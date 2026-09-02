@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
-export function NewAthleteDialog() {
+export function NewAthleteDialog({ onCreated }: { onCreated?: () => void } = {}) {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -43,6 +43,7 @@ export function NewAthleteDialog() {
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error ?? 'No pudimos guardar el deportista.');
       setSaved(true);
+      onCreated?.();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No pudimos guardar el deportista.');
     } finally {

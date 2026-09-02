@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   const [groupResult, athleteResult, membershipResult] = await Promise.all([
     db.prepare(`SELECT g.id, g.name, g.sport, g.season, g.active,
       o.id AS organizationId, o.name AS organizationName, o.type AS organizationType,
-      COUNT(CASE WHEN gm.ended_at IS NULL THEN 1 END) AS memberCount
+      COUNT(CASE WHEN gm.athlete_id IS NOT NULL AND gm.ended_at IS NULL THEN 1 END) AS memberCount
       FROM groups g
       JOIN organizations o ON o.id = g.organization_id
       LEFT JOIN group_memberships gm ON gm.group_id = g.id

@@ -47,10 +47,10 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
         </a>
 
         <a href="/grupos" className="mt-7 flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/75 px-3 py-2.5 text-left shadow-sm transition hover:bg-white">
-          <span className="grid size-8 place-items-center rounded-lg bg-[#10253d] text-xs font-bold text-white">SA</span>
+          <span className="grid size-8 place-items-center rounded-lg bg-[#10253d] text-white"><UsersRound className="size-4" /></span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-semibold">Todos los grupos</span>
-            <span className="block truncate text-[11px] text-muted-foreground">4 organizaciones</span>
+            <span className="block truncate text-xs font-semibold">Grupos y planteles</span>
+            <span className="block truncate text-[11px] text-muted-foreground">Organizar deportistas</span>
           </span>
           <ChevronDown className="size-4 text-muted-foreground" />
         </a>
@@ -77,11 +77,11 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
         <div className="mt-auto rounded-2xl bg-[#10253d] p-4 text-white shadow-[0_16px_40px_-24px_#10253d]">
           <div className="mb-3 flex items-center justify-between">
             <span className="grid size-7 place-items-center rounded-lg bg-white/10"><Sparkles className="size-3.5 text-[#c8f15a]" /></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">Esta semana</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">Primeros pasos</span>
           </div>
-          <p className="text-sm font-semibold">86% de cumplimiento</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-white/60">112 de 130 sesiones completadas</p>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full w-[86%] rounded-full bg-[#c8f15a]" /></div>
+          <p className="text-sm font-semibold">Armá tu base real</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/60">Cargá deportistas y asignales uno o varios grupos.</p>
+          <a href="/deportistas" className="mt-3 inline-block text-[11px] font-semibold text-[#c8f15a] hover:underline">Ir a Deportistas</a>
         </div>
 
         <div className="mt-3 flex items-center gap-3 rounded-xl px-2 py-2 text-left">

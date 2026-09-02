@@ -1,15 +1,23 @@
 import { getD1 } from '@/db';
-import { getSessionFromRequest } from '@/lib/auth';
+import { getSessionFromRequest, isSameOrigin } from '@/lib/auth';
 
 export const runtime = 'edge';
 
 export async function GET(request: Request) {
   if (!await getSessionFromRequest(request)) return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const athletes = await getD1().prepare(
-    `SELECT id, first_name AS firstName, last_name AS lastName, email,
-      primary_position AS primaryPosition, primary_context AS primaryContext,
-      status, created_at AS createdAt
-    FROM athletes ORDER BY created_at DESC LIMIT 200`,
+    `SELECT a.id, a.first_name AS firstName, a.last_name AS lastName, a.email,
+      a.primary_position AS primaryPosition, a.primary_context AS primaryContext,
+      a.status, a.created_at AS createdAt,
+      COALESCE(GROUP_CONCAT(CASE WHEN gm.ended_at IS NULL AND g.active = 1 THEN g.name END, '|||'), '') AS groupNames,
+      COUNT(DISTINCT CASE WHEN gm.ended_at IS NULL AND g.active = 1 THEN g.id END) AS groupCount
+    FROM athletes a
+    LEFT JOIN group_memberships gm ON gm.athlete_id = a.id
+    LEFT JOIN groups g ON g.id = gm.group_id
+    WHERE a.status = 'active'
+    GROUP BY a.id, a.first_name, a.last_name, a.email, a.primary_position,
+      a.primary_context, a.status, a.created_at
+    ORDER BY a.last_name, a.first_name LIMIT 500`,
   ).all();
 
   return Response.json({ athletes: athletes.results });
@@ -17,6 +25,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!await getSessionFromRequest(request)) return Response.json({ error: 'No autorizado.' }, { status: 401 });
+  if (!isSameOrigin(request)) return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
   const input = await request.json<{
     firstName?: string;
     lastName?: string;
