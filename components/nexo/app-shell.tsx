@@ -10,6 +10,7 @@ import {
   Search,
   Sparkles,
   Users,
+  UsersRound,
   Zap,
 } from 'lucide-react';
 
@@ -19,11 +20,12 @@ import { LogoutButton } from '@/components/nexo/logout-button';
 import { requireSession } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
-export type NexoSection = 'inicio' | 'deportistas' | 'rutinas' | 'evaluaciones' | 'agenda' | 'carga';
+export type NexoSection = 'inicio' | 'deportistas' | 'grupos' | 'rutinas' | 'evaluaciones' | 'agenda' | 'carga';
 
 const navigation: Array<{ id: NexoSection; label: string; href: string; icon: typeof LayoutDashboard; soon?: boolean }> = [
   { id: 'inicio', label: 'Inicio', href: '/', icon: LayoutDashboard },
   { id: 'deportistas', label: 'Deportistas', href: '/deportistas', icon: Users },
+  { id: 'grupos', label: 'Grupos', href: '/grupos', icon: UsersRound },
   { id: 'rutinas', label: 'Rutinas', href: '/rutinas', icon: Dumbbell },
   { id: 'evaluaciones', label: 'Evaluaciones', href: '/evaluaciones', icon: ClipboardCheck },
   { id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarDays, soon: true },
@@ -44,14 +46,14 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
           </div>
         </a>
 
-        <button className="mt-7 flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/75 px-3 py-2.5 text-left shadow-sm transition hover:bg-white">
+        <a href="/grupos" className="mt-7 flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/75 px-3 py-2.5 text-left shadow-sm transition hover:bg-white">
           <span className="grid size-8 place-items-center rounded-lg bg-[#10253d] text-xs font-bold text-white">SA</span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold">Todos los grupos</span>
             <span className="block truncate text-[11px] text-muted-foreground">4 organizaciones</span>
           </span>
           <ChevronDown className="size-4 text-muted-foreground" />
-        </button>
+        </a>
 
         <nav aria-label="Navegación principal" className="mt-6 space-y-1">
           {navigation.map((item) => (
@@ -112,8 +114,8 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
         {children}
       </section>
 
-      <nav aria-label="Navegación móvil" className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-4 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden">
-        {navigation.slice(0, 4).map((item) => (
+      <nav aria-label="Navegación móvil" className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden">
+        {navigation.slice(0, 5).map((item) => (
           <a key={item.id} href={item.href} className={cn('flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[9px] font-semibold', active === item.id ? 'bg-[#10253d] text-white' : 'text-muted-foreground')}>
             <item.icon className="size-4" /> {item.label}
           </a>

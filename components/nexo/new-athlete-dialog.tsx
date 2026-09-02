@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check, Plus, UserPlus } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,14 @@ export function NewAthleteDialog() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [groups, setGroups] = useState<Array<{ id: string; name: string; organizationName: string }>>([]);
+
+  useEffect(() => {
+    fetch('/api/groups')
+      .then((response) => response.ok ? response.json() : { groups: [] })
+      .then((result: { groups?: Array<{ id: string; name: string; organizationName: string }> }) => setGroups(result.groups ?? []))
+      .catch(() => setGroups([]));
+  }, []);
 
   async function createAthlete(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28,7 +36,7 @@ export function NewAthleteDialog() {
           firstName: form.get('firstName'),
           lastName: form.get('lastName'),
           email: form.get('email'),
-          group: form.get('group'),
+          groupId: form.get('groupId'),
           position: form.get('position'),
         }),
       });
@@ -70,7 +78,7 @@ export function NewAthleteDialog() {
               </div>
               <div className="space-y-1.5"><Label htmlFor="athlete-email">Email</Label><Input id="athlete-email" name="email" type="email" placeholder="jugador@email.com" required /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><Label htmlFor="group">Grupo</Label><NativeSelect id="group" name="group" defaultValue="Selección Argentina · Beach"><NativeSelectOption value="Selección Argentina · Beach">Selección Beach</NativeSelectOption><NativeSelectOption value="Club · Plantel superior">Club · Plantel superior</NativeSelectOption><NativeSelectOption value="Gimnasio">Gimnasio</NativeSelectOption><NativeSelectOption value="Internacionales">Internacionales</NativeSelectOption></NativeSelect></div>
+                <div className="space-y-1.5"><Label htmlFor="group">Grupo</Label><NativeSelect id="group" name="groupId" defaultValue=""><NativeSelectOption value="">Sin grupo por ahora</NativeSelectOption>{groups.map((group) => <NativeSelectOption key={group.id} value={group.id}>{group.organizationName} · {group.name}</NativeSelectOption>)}</NativeSelect>{groups.length === 0 && <a href="/grupos" className="text-[10px] font-semibold text-[#52751d] hover:underline">Crear un grupo primero</a>}</div>
                 <div className="space-y-1.5"><Label htmlFor="position">Posición / rol</Label><NativeSelect id="position" name="position" defaultValue="Lateral"><NativeSelectOption value="Lateral">Lateral</NativeSelectOption><NativeSelectOption value="Extremo">Extremo</NativeSelectOption><NativeSelectOption value="Central">Central</NativeSelectOption><NativeSelectOption value="Pivote">Pivote</NativeSelectOption><NativeSelectOption value="Arquero">Arquero</NativeSelectOption><NativeSelectOption value="Especialista beach">Especialista beach</NativeSelectOption></NativeSelect></div>
               </div>
               {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">{error}</p>}
