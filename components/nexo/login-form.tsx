@@ -3,9 +3,8 @@
 import { useState } from 'react';
 import { ArrowRight, CheckCircle2, Eye, EyeOff, KeyRound, Link2, ShieldCheck, Sparkles, Zap } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 
 export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -72,15 +71,15 @@ export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{setupRequired ? 'Creá la primera cuenta administradora. Esto se realiza una sola vez.' : 'Usá las credenciales de tu cuenta de preparador físico.'}</p>
 
             <form onSubmit={submit} className="mt-7 space-y-4">
-              {setupRequired && <div className="space-y-1.5"><Label htmlFor="login-name">Nombre completo</Label><Input id="login-name" name="name" autoComplete="name" placeholder="Manuel Abalsamo" required /></div>}
-              <div className="space-y-1.5"><Label htmlFor="login-email">Email</Label><Input id="login-email" name="email" type="email" autoComplete="email" placeholder="pf@equipo.com" required /></div>
+              {setupRequired && <div className="space-y-1.5"><Label htmlFor="login-name">Nombre completo</Label><LoginInput id="login-name" name="name" autoComplete="name" placeholder="Manuel Abalsamo" required /></div>}
+              <div className="space-y-1.5"><Label htmlFor="login-email">Email</Label><LoginInput id="login-email" name="email" type="email" autoComplete="email" placeholder="pf@equipo.com" required /></div>
               <div className="space-y-1.5">
                 <Label htmlFor="login-password">Contraseña</Label>
-                <div className="relative"><Input id="login-password" name="password" type={showPassword ? 'text' : 'password'} autoComplete={setupRequired ? 'new-password' : 'current-password'} placeholder={setupRequired ? 'Mínimo 10 caracteres' : 'Tu contraseña'} minLength={setupRequired ? 10 : undefined} required className="pr-11" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} className="absolute inset-y-0 right-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div>
+                <div className="relative"><LoginInput id="login-password" name="password" type={showPassword ? 'text' : 'password'} autoComplete={setupRequired ? 'new-password' : 'current-password'} placeholder={setupRequired ? 'Mínimo 10 caracteres' : 'Tu contraseña'} minLength={setupRequired ? 10 : undefined} required className="pr-11" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} className="absolute inset-y-0 right-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div>
               </div>
-              {setupRequired && <div className="space-y-1.5"><Label htmlFor="activation-code">Código de activación</Label><div className="relative"><KeyRound className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input id="activation-code" name="activationCode" autoComplete="one-time-code" placeholder="Código entregado por Nexo" required className="pl-9 font-mono uppercase tracking-wider" /></div></div>}
+              {setupRequired && <div className="space-y-1.5"><Label htmlFor="activation-code">Código de activación</Label><div className="relative"><KeyRound className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><LoginInput id="activation-code" name="activationCode" autoComplete="one-time-code" placeholder="Código entregado por Nexo" required className="pl-9 font-mono uppercase tracking-wider" /></div></div>}
               {error && <p role="alert" className="rounded-xl bg-[#fff0ed] px-3 py-2.5 text-xs font-medium text-[#a23f30]">{error}</p>}
-              <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl bg-[#10253d] text-white hover:bg-[#183653]">{loading ? 'Ingresando…' : setupRequired ? 'Crear cuenta e ingresar' : 'Ingresar'}<ArrowRight className="size-4" /></Button>
+              <button type="submit" disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#10253d] px-4 text-sm font-semibold text-white transition hover:bg-[#183653] disabled:pointer-events-none disabled:opacity-55">{loading ? 'Ingresando…' : setupRequired ? 'Crear cuenta e ingresar' : 'Ingresar'}<ArrowRight className="size-4" /></button>
             </form>
           </div>
 
@@ -92,4 +91,8 @@ export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
       </section>
     </main>
   );
+}
+
+function LoginInput({ className, ...props }: React.ComponentProps<'input'>) {
+  return <input {...props} className={cn('h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/40 disabled:opacity-50', className)} />;
 }
