@@ -3,5 +3,6 @@ declare namespace Cloudflare {
     DB: D1Database;
     FILES: R2Bucket;
     NEXO_BOOTSTRAP_CODE?: string;
+    NEXO_PASSWORD_PEPPER?: string;
   }
 }

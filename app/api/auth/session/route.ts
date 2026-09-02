@@ -37,6 +37,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true }, { headers: { 'set-cookie': sessionCookie(token) } });
   } catch (error) {
     if (error instanceof AuthError) return Response.json({ error: error.message }, { status: error.status });
+    console.error('[nexo-auth] Unexpected authentication failure', error);
     return Response.json({ error: 'No pudimos completar el ingreso. Intentá nuevamente.' }, { status: 500 });
   }
 }

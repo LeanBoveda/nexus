@@ -79,13 +79,19 @@ export async function createOwner(input: { name: string; email: string; password
   validateCredentials(input.name, email, input.password);
   const { salt, hash } = await hashPassword(input.password);
   const id = crypto.randomUUID();
-  await env.DB.prepare(`INSERT INTO users
-    (id, email, name, role, password_salt, password_hash, status, created_at)
-    VALUES (?, ?, ?, 'owner', ?, ?, 'active', ?)`)
-    .bind(id, email, input.name.trim(), salt, hash, Date.now())
-    .run();
+  const token = randomToken(32);
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO users
+      (id, email, name, role, password_salt, password_hash, status, created_at)
+      VALUES (?, ?, ?, 'owner', ?, ?, 'active', ?)`)
+      .bind(id, email, input.name.trim(), salt, hash, now),
+    env.DB.prepare(`INSERT INTO auth_sessions
+      (token_hash, user_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(await sha256(token), id, now + SESSION_DURATION_MS, now, now),
+  ]);
 
-  return createSession(id);
+  return token;
 }
 
 export async function authenticate(input: { email: string; password: string; ip: string }) {
@@ -210,8 +216,9 @@ async function verifyPassword(password: string, salt: string, expected: string) 
 }
 
 async function derivePasswordHash(password: string, salt: Uint8Array) {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 310_000 }, key, 256);
+  const pepperedPassword = `${password}\u0000${env.NEXO_PASSWORD_PEPPER ?? ''}`;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pepperedPassword), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 100_000 }, key, 256);
   return toBase64Url(new Uint8Array(bits));
 }
 
