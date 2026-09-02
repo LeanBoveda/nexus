@@ -7,6 +7,7 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://nexo-rendimiento.cuentagpt050.chatgpt.site'),
   title: 'Nexo · Rendimiento deportivo',
   description:
     'Planificación, seguimiento y evaluación para preparadores físicos de handball indoor y beach handball.',

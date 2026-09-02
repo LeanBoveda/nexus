@@ -192,3 +192,52 @@ export const files = sqliteTable(
   },
   (table) => [uniqueIndex('files_storage_key_unique').on(table.storageKey)],
 );
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    role: text('role', { enum: ['owner', 'coach', 'athlete'] }).notNull(),
+    passwordSalt: text('password_salt'),
+    passwordHash: text('password_hash'),
+    athleteId: text('athlete_id').references(() => athletes.id, { onDelete: 'set null' }),
+    status: text('status', { enum: ['active', 'disabled'] }).notNull().default('active'),
+    createdAt,
+  },
+  (table) => [uniqueIndex('users_email_unique').on(table.email), index('users_athlete_idx').on(table.athleteId)],
+);
+
+export const authSessions = sqliteTable(
+  'auth_sessions',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt,
+    lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [index('auth_sessions_user_idx').on(table.userId), index('auth_sessions_expiry_idx').on(table.expiresAt)],
+);
+
+export const athleteAccessLinks = sqliteTable(
+  'athlete_access_links',
+  {
+    id: text('id').primaryKey(),
+    athleteId: text('athlete_id').notNull().references(() => athletes.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    redeemedAt: integer('redeemed_at', { mode: 'timestamp_ms' }),
+    createdBy: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt,
+  },
+  (table) => [uniqueIndex('athlete_access_links_token_unique').on(table.tokenHash), index('athlete_access_links_athlete_idx').on(table.athleteId)],
+);
+
+export const loginAttempts = sqliteTable('login_attempts', {
+  key: text('key').primaryKey(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  windowStartedAt: integer('window_started_at', { mode: 'timestamp_ms' }).notNull(),
+  blockedUntil: integer('blocked_until', { mode: 'timestamp_ms' }),
+});

@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   Plus,
   Search,
-  Settings,
   Sparkles,
   Users,
   Zap,
@@ -16,6 +15,8 @@ import {
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { buttonVariants } from '@/components/ui/button';
+import { LogoutButton } from '@/components/nexo/logout-button';
+import { requireSession } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 export type NexoSection = 'inicio' | 'deportistas' | 'rutinas' | 'evaluaciones' | 'agenda' | 'carga';
@@ -29,7 +30,9 @@ const navigation: Array<{ id: NexoSection; label: string; href: string; icon: ty
   { id: 'carga', label: 'Carga y bienestar', href: '/carga', icon: Activity, soon: true },
 ];
 
-export function AppShell({ active, children }: { active: NexoSection; children: React.ReactNode }) {
+export async function AppShell({ active, children }: { active: NexoSection; children: React.ReactNode }) {
+  const user = await requireSession();
+  const initials = user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   return (
     <main className="min-h-screen bg-background text-foreground">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[244px] border-r border-sidebar-border bg-sidebar px-4 py-5 lg:flex lg:flex-col">
@@ -79,14 +82,14 @@ export function AppShell({ active, children }: { active: NexoSection; children: 
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full w-[86%] rounded-full bg-[#c8f15a]" /></div>
         </div>
 
-        <button className="mt-3 flex items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-sidebar-accent">
-          <Avatar size="lg"><AvatarFallback className="bg-[#dce6ee] text-xs font-bold text-[#10253d]">MA</AvatarFallback></Avatar>
+        <div className="mt-3 flex items-center gap-3 rounded-xl px-2 py-2 text-left">
+          <Avatar size="lg"><AvatarFallback className="bg-[#dce6ee] text-xs font-bold text-[#10253d]">{initials}</AvatarFallback></Avatar>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-semibold">Manuel Abalsamo</span>
-            <span className="block text-[11px] text-muted-foreground">Preparador físico</span>
+            <span className="block truncate text-xs font-semibold">{user.name}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{user.email}</span>
           </span>
-          <Settings className="size-4 text-muted-foreground" />
-        </button>
+          <LogoutButton />
+        </div>
       </aside>
 
       <section className="pb-20 lg:pl-[244px] lg:pb-0">

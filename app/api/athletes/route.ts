@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:workers';
 
+import { getSessionFromRequest } from '@/lib/auth';
+
 export const runtime = 'edge';
 
 const createAthletesTable = `
@@ -25,7 +27,8 @@ async function ensureStorage() {
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS athletes_status_idx ON athletes (status)').run();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!await getSessionFromRequest(request)) return Response.json({ error: 'No autorizado.' }, { status: 401 });
   await ensureStorage();
   const athletes = await env.DB.prepare(
     `SELECT id, first_name AS firstName, last_name AS lastName, email,
@@ -38,6 +41,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!await getSessionFromRequest(request)) return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const input = await request.json<{
     firstName?: string;
     lastName?: string;
