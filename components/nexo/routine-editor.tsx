@@ -10,7 +10,6 @@ import {
   ClipboardList,
   FileSpreadsheet,
   GripVertical,
-  Layers3,
   Plus,
   Save,
   Send,
@@ -37,6 +36,13 @@ type ExerciseRow = {
   rir: string[];
 };
 type AssignmentTarget = { id: string; name: string; detail: string; type: 'Grupo' | 'Persona' };
+type WeekPlan = {
+  number: string;
+  phase: string;
+  objective: string;
+  secondary: string;
+  pse: string;
+};
 
 const initialRows: ExerciseRow[] = [
   { id: 1, block: 'A', category: 'Potencia', name: 'Arranque desde cajón', values: ['4 · 4 · 3', '3 · 3 · 3', '3 · 3 · 3', '5 · 4 · 3'], rir: ['4–3', '3', '3', '4–3'] },
@@ -50,7 +56,7 @@ const initialRows: ExerciseRow[] = [
   { id: 9, block: 'D', category: 'Fuerza', name: 'Remo landmine desde bisagra unipodal', values: ['3 × 8 + 8', '3 × 8 + 8', '3 × 10 + 10', '3 × 6 + 6'], rir: ['3', '3', '3', '5'] },
 ];
 
-const weeks = [
+const initialWeeks: WeekPlan[] = [
   { number: '12', phase: 'Ajuste', objective: 'Fuerza estructural', secondary: 'Fuerza potencia', pse: '5' },
   { number: '13', phase: 'Carga', objective: 'Fuerza estructural', secondary: 'Fuerza potencia', pse: '6' },
   { number: '14', phase: 'Carga', objective: 'Fuerza máxima', secondary: 'Fuerza potencia', pse: '6' },
@@ -66,7 +72,10 @@ const blockDescriptions: Record<string, string> = {
 
 export function RoutineEditor() {
   const [rows, setRows] = useState(initialRows);
+  const [weekPlans, setWeekPlans] = useState(initialWeeks);
   const [activeWeek, setActiveWeek] = useState(0);
+  const [sessionName, setSessionName] = useState('Día A · Full body');
+  const [warmup, setWarmup] = useState('Movilidad, core y preventivos de hombro antes de comenzar.');
   const [saved, setSaved] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targets, setTargets] = useState<AssignmentTarget[]>([]);
@@ -99,8 +108,15 @@ export function RoutineEditor() {
   }, []);
 
   const blocks = useMemo(() => Array.from(new Set(rows.map((row) => row.block))), [rows]);
-  const currentWeek = weeks[activeWeek];
+  const currentWeek = weekPlans[activeWeek];
   const selectedTarget = targets.find((target) => target.id === selectedTargetId) ?? null;
+
+  function updateWeek(field: keyof WeekPlan, value: string) {
+    setWeekPlans((current) => current.map((week, index) => (
+      index === activeWeek ? { ...week, [field]: value } : week
+    )));
+    setSaved(false);
+  }
 
   function updateExercise(id: number, field: 'name' | 'value' | 'rir', value: string) {
     setRows((current) => current.map((row) => {
@@ -173,10 +189,10 @@ export function RoutineEditor() {
           <span className="hidden text-sm text-muted-foreground sm:block">{rows.length} ejercicios · {blocks.length} bloques</span>
         </div>
         <div className="grid gap-2 sm:grid-cols-4">
-          {weeks.map((week, index) => {
+          {weekPlans.map((week, index) => {
             const active = activeWeek === index;
             return (
-              <button key={week.number} onClick={() => setActiveWeek(index)} aria-pressed={active} className={`group rounded-2xl border p-3 text-left transition ${active ? 'border-[#10253d] bg-[#10253d] text-white shadow-lg shadow-[#10253d]/15' : 'border-border bg-background hover:border-[#b7c7d3] hover:bg-muted/35'}`}>
+              <button key={index} onClick={() => setActiveWeek(index)} aria-pressed={active} className={`group rounded-2xl border p-3 text-left transition ${active ? 'border-[#10253d] bg-[#10253d] text-white shadow-lg shadow-[#10253d]/15' : 'border-border bg-background hover:border-[#b7c7d3] hover:bg-muted/35'}`}>
                 <span className="flex items-center justify-between gap-2"><span className={`text-sm font-semibold ${active ? 'text-white/65' : 'text-muted-foreground'}`}>Semana {week.number}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${active ? 'bg-[#c8f15a] text-[#26340f]' : phaseTone(week.phase)}`}>{week.phase}</span></span>
                 <span className="mt-3 block text-base font-bold">{week.objective}</span>
                 <span className={`mt-1 block text-sm ${active ? 'text-white/55' : 'text-muted-foreground'}`}>PSE {week.pse} · {week.secondary}</span>
@@ -190,7 +206,13 @@ export function RoutineEditor() {
         <main className="space-y-4">
           <div className="flex flex-col gap-3 rounded-[22px] bg-[#10253d] p-5 text-white sm:flex-row sm:items-center">
             <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-[#c8f15a]"><Zap className="size-5" /></span>
-            <div className="flex-1"><p className="text-xl font-bold tracking-[-0.03em]">Día A · Full body</p><p className="mt-1 text-sm text-white/55">Movilidad, core y preventivos de hombro antes de comenzar.</p></div>
+            <div className="min-w-0 flex-1">
+              <input value={sessionName} onChange={(event) => { setSessionName(event.target.value); setSaved(false); }} aria-label="Nombre de la sesión" className="w-full bg-transparent text-xl font-bold tracking-[-0.03em] text-white outline-none placeholder:text-white/35 focus:text-[#dff58f]" />
+              <label className="mt-2 block">
+                <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/45">Entrada en calor</span>
+                <input value={warmup} onChange={(event) => { setWarmup(event.target.value); setSaved(false); }} aria-label="Entrada en calor" className="mt-0.5 w-full border-b border-transparent bg-transparent pb-1 text-sm text-white/65 outline-none transition placeholder:text-white/35 focus:border-white/25 focus:text-white" />
+              </label>
+            </div>
             <Badge className="w-fit bg-white/10 text-white">Semana {currentWeek.number}</Badge>
           </div>
 
@@ -227,14 +249,21 @@ export function RoutineEditor() {
 
         <aside className="space-y-4 xl:sticky xl:top-[88px]">
           <section className="rounded-[22px] border border-border bg-card p-5 shadow-[0_18px_50px_-42px_#10253d]">
-            <div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-muted-foreground">Semana {currentWeek.number}</p><h2 className="mt-1 text-xl font-bold">{currentWeek.phase}</h2></div><span className="grid size-10 place-items-center rounded-xl bg-[#edf4e1] text-[#52751d]"><Activity className="size-5" /></span></div>
-            <div className="mt-5 space-y-4">
-              <InfoRow icon={Layers3} label="Objetivo principal" value={currentWeek.objective} />
-              <InfoRow icon={Zap} label="Complemento" value={currentWeek.secondary} />
+            <div className="flex items-center justify-between"><div><p className="text-sm font-semibold text-muted-foreground">Configuración semanal</p><h2 className="mt-1 text-xl font-bold">Editá la semana activa</h2></div><span className="grid size-10 place-items-center rounded-xl bg-[#edf4e1] text-[#52751d]"><Activity className="size-5" /></span></div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <LabeledInput label="Semana" value={currentWeek.number} placeholder="Ej. 12" onChange={(value) => updateWeek('number', value)} />
+              <LabeledInput label="Período" value={currentWeek.phase} placeholder="Ej. Carga" onChange={(value) => updateWeek('phase', value)} />
+            </div>
+            <div className="mt-4 space-y-4">
+              <LabeledInput label="Objetivo principal" value={currentWeek.objective} placeholder="Ej. Fuerza estructural" onChange={(value) => updateWeek('objective', value)} />
+              <LabeledInput label="Objetivo complementario" value={currentWeek.secondary} placeholder="Ej. Fuerza potencia" onChange={(value) => updateWeek('secondary', value)} />
             </div>
             <div className="mt-5 rounded-2xl bg-[#10253d] p-4 text-white">
-              <div className="flex items-end justify-between"><div><p className="text-sm text-white/55">PSE estimado</p><p className="mt-1 text-3xl font-bold">{currentWeek.pse}<span className="text-base font-medium text-white/40"> / 10</span></p></div><span className="text-sm font-semibold text-[#c8f15a]">{pseLabel(Number(currentWeek.pse))}</span></div>
-              <Progress value={Number(currentWeek.pse) * 10} className="mt-4 [&_[data-slot=progress-track]]:bg-white/10 [&_[data-slot=progress-indicator]]:bg-[#c8f15a]" />
+              <div className="flex items-end justify-between gap-3">
+                <label><span className="block text-sm text-white/55">PSE estimado</span><span className="mt-1 flex items-baseline"><input type="number" min="0" max="10" step="1" value={currentWeek.pse} onChange={(event) => updateWeek('pse', event.target.value)} aria-label="PSE estimado" className="w-12 bg-transparent text-3xl font-bold text-white outline-none focus:text-[#dff58f]" /><span className="text-base font-medium text-white/40">/ 10</span></span></label>
+                <span className="text-sm font-semibold text-[#c8f15a]">{pseLabel(Number(currentWeek.pse))}</span>
+              </div>
+              <Progress value={Math.max(0, Math.min(100, Number(currentWeek.pse) * 10))} className="mt-4 [&_[data-slot=progress-track]]:bg-white/10 [&_[data-slot=progress-indicator]]:bg-[#c8f15a]" />
             </div>
           </section>
 
@@ -245,8 +274,8 @@ export function RoutineEditor() {
 
           <div className="flex items-center justify-between gap-2">
             <Button variant="outline" disabled={activeWeek === 0} onClick={() => setActiveWeek((week) => Math.max(0, week - 1))}><ChevronLeft /> Anterior</Button>
-            <span className="text-sm font-medium text-muted-foreground">{activeWeek + 1} de {weeks.length}</span>
-            <Button variant="outline" disabled={activeWeek === weeks.length - 1} onClick={() => setActiveWeek((week) => Math.min(weeks.length - 1, week + 1))}>Siguiente <ChevronRight /></Button>
+            <span className="text-sm font-medium text-muted-foreground">{activeWeek + 1} de {weekPlans.length}</span>
+            <Button variant="outline" disabled={activeWeek === weekPlans.length - 1} onClick={() => setActiveWeek((week) => Math.min(weekPlans.length - 1, week + 1))}>Siguiente <ChevronRight /></Button>
           </div>
         </aside>
       </div>
@@ -256,10 +285,6 @@ export function RoutineEditor() {
 
 function LabeledInput({ label, value, placeholder, onChange }: { label: string; value: string; placeholder: string; onChange: (value: string) => void }) {
   return <label className="block"><span className="mb-1.5 block text-sm font-semibold text-muted-foreground">{label}</span><input value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm font-semibold outline-none transition focus:border-[#8fbc29] focus:ring-3 focus:ring-[#b9dc68]/20" /></label>;
-}
-
-function InfoRow({ icon: Icon, label, value }: { icon: typeof Layers3; label: string; value: string }) {
-  return <div className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-[#29445e]"><Icon className="size-4" /></span><div><p className="text-sm text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div></div>;
 }
 
 function AssignmentDialog({ targets, selectedId, onSelect, onAssign }: { targets: AssignmentTarget[]; selectedId: string; onSelect: (value: string) => void; onAssign: () => void }) {
