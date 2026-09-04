@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 const SESSION_COOKIE = 'nexo_session';
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 7;
 
@@ -14,40 +15,7 @@ export type NexoUser = {
   role: 'owner' | 'coach' | 'athlete';
 };
 
-export async function ensureAuthStorage() {
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY NOT NULL,
-    email TEXT NOT NULL,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL,
-    password_salt TEXT,
-    password_hash TEXT,
-    athlete_id TEXT,
-    status TEXT DEFAULT 'active' NOT NULL,
-    created_at INTEGER DEFAULT (unixepoch() * 1000) NOT NULL,
-    FOREIGN KEY (athlete_id) REFERENCES athletes(id) ON DELETE SET NULL
-  )`).run();
-  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email)').run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS auth_sessions (
-    token_hash TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER DEFAULT (unixepoch() * 1000) NOT NULL,
-    last_seen_at INTEGER NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`).run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions (user_id)').run();
-  await env.DB.prepare('CREATE INDEX IF NOT EXISTS auth_sessions_expiry_idx ON auth_sessions (expires_at)').run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_attempts (
-    key TEXT PRIMARY KEY NOT NULL,
-    attempt_count INTEGER DEFAULT 0 NOT NULL,
-    window_started_at INTEGER NOT NULL,
-    blocked_until INTEGER
-  )`).run();
-}
-
 export async function getAuthStatus() {
-  await ensureAuthStorage();
   const owner = await env.DB.prepare("SELECT id FROM users WHERE role = 'owner' AND status = 'active' LIMIT 1").first();
   return { setupRequired: !owner };
 }
@@ -68,7 +36,6 @@ export async function requireSession() {
 }
 
 export async function createOwner(input: { name: string; email: string; password: string; activationCode: string }) {
-  await ensureAuthStorage();
   if (!env.NEXO_BOOTSTRAP_CODE) throw new AuthError('El código de activación todavía no está configurado.', 503);
   if (!(await secureTextEqual(input.activationCode, env.NEXO_BOOTSTRAP_CODE))) throw new AuthError('El código de activación no es válido.', 401);
 
@@ -95,7 +62,6 @@ export async function createOwner(input: { name: string; email: string; password
 }
 
 export async function authenticate(input: { email: string; password: string; ip: string }) {
-  await ensureAuthStorage();
   const email = normalizeEmail(input.email);
   const rateKey = await sha256(`${input.ip}|${email}`);
   await assertLoginAllowed(rateKey);
@@ -151,19 +117,21 @@ async function createSession(userId: string) {
 
 async function getSessionByToken(token?: string): Promise<NexoUser | null> {
   if (!token) return null;
-  await ensureAuthStorage();
   const now = Date.now();
   const tokenHash = await sha256(token);
-  const result = await env.DB.prepare(`SELECT u.id, u.email, u.name, u.role, s.expires_at AS expiresAt
+  const result = await env.DB.prepare(`SELECT u.id, u.email, u.name, u.role,
+    s.expires_at AS expiresAt, s.last_seen_at AS lastSeenAt
     FROM auth_sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND u.status = 'active' LIMIT 1`)
     .bind(tokenHash)
-    .first<NexoUser & { expiresAt: number }>();
+    .first<NexoUser & { expiresAt: number; lastSeenAt: number }>();
   if (!result || result.expiresAt <= now) {
     await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').bind(tokenHash).run();
     return null;
   }
-  await env.DB.prepare('UPDATE auth_sessions SET last_seen_at = ? WHERE token_hash = ?').bind(now, tokenHash).run();
+  if (now - result.lastSeenAt >= SESSION_TOUCH_INTERVAL_MS) {
+    await env.DB.prepare('UPDATE auth_sessions SET last_seen_at = ? WHERE token_hash = ?').bind(now, tokenHash).run();
+  }
   return { id: result.id, email: result.email, name: result.name, role: result.role };
 }
 

@@ -13,6 +13,7 @@ import {
   UsersRound,
   Zap,
 } from 'lucide-react';
+import Link from 'next/link';
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { buttonVariants } from '@/components/ui/button';
@@ -38,26 +39,26 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
   return (
     <main className="min-h-screen bg-background text-foreground">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[244px] border-r border-sidebar-border bg-sidebar px-4 py-5 lg:flex lg:flex-col">
-        <a href="/" className="flex items-center gap-3 px-2">
+        <Link href="/" className="flex items-center gap-3 px-2">
           <LogoMark />
           <div>
             <p className="text-[15px] font-bold leading-none tracking-[-0.03em]">NEXO</p>
             <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Rendimiento</p>
           </div>
-        </a>
+        </Link>
 
-        <a href="/grupos" className="mt-7 flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/75 px-3 py-2.5 text-left shadow-sm transition hover:bg-white">
+        <Link href="/grupos" className="mt-7 flex w-full items-center gap-3 rounded-xl border border-sidebar-border bg-white/75 px-3 py-2.5 text-left shadow-sm transition hover:bg-white">
           <span className="grid size-8 place-items-center rounded-lg bg-[#10253d] text-white"><UsersRound className="size-4" /></span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold">Grupos y planteles</span>
             <span className="block truncate text-[11px] text-muted-foreground">Organizar deportistas</span>
           </span>
           <ChevronDown className="size-4 text-muted-foreground" />
-        </a>
+        </Link>
 
         <nav aria-label="Navegación principal" className="mt-6 space-y-1">
           {navigation.map((item) => (
-            <a
+            <Link
               key={item.id}
               href={item.href}
               className={cn(
@@ -70,7 +71,7 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
               <item.icon className="size-4" strokeWidth={1.9} />
               <span>{item.label}</span>
               {item.soon && <span className="ml-auto rounded-full bg-[#e6ebde] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#677154]">Pronto</span>}
-            </a>
+            </Link>
           ))}
         </nav>
 
@@ -81,7 +82,7 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
           </div>
           <p className="text-sm font-semibold">Armá tu base real</p>
           <p className="mt-1 text-[11px] leading-relaxed text-white/60">Cargá deportistas y asignales uno o varios grupos.</p>
-          <a href="/deportistas" className="mt-3 inline-block text-[11px] font-semibold text-[#c8f15a] hover:underline">Ir a Deportistas</a>
+          <Link href="/deportistas" className="mt-3 inline-block text-[11px] font-semibold text-[#c8f15a] hover:underline">Ir a Deportistas</Link>
         </div>
 
         <div className="mt-3 flex items-center gap-3 rounded-xl px-2 py-2 text-left">
@@ -96,7 +97,7 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
 
       <section className="pb-20 lg:pl-[244px] lg:pb-0">
         <header className="sticky top-0 z-20 flex h-[68px] items-center border-b border-border/80 bg-background/90 px-5 backdrop-blur-xl sm:px-7 lg:px-9">
-          <a href="/" className="flex items-center gap-3 lg:hidden"><LogoMark compact /><span className="text-sm font-bold tracking-tight">NEXO</span></a>
+          <Link href="/" className="flex items-center gap-3 lg:hidden"><LogoMark compact /><span className="text-sm font-bold tracking-tight">NEXO</span></Link>
           <label className="ml-auto hidden h-9 w-[min(360px,36vw)] items-center gap-2 rounded-xl border border-border bg-card px-3 text-muted-foreground shadow-sm md:flex lg:ml-0">
             <Search className="size-4" />
             <input aria-label="Buscar deportistas, grupos o rutinas" placeholder="Buscar deportistas, grupos o rutinas..." className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground" />
@@ -106,9 +107,9 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
             <button aria-label="Notificaciones" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-foreground transition hover:bg-muted">
               <Bell className="size-4" /><span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#ef664d] ring-2 ring-card" />
             </button>
-            <a href="/rutinas/nueva" className={cn(buttonVariants({ size: 'lg' }), 'h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]')}>
+            <Link href="/rutinas/nueva" className={cn(buttonVariants({ size: 'lg' }), 'h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]')}>
               <Plus className="size-4" /> Nueva rutina
-            </a>
+            </Link>
           </div>
         </header>
         {children}
@@ -116,9 +117,9 @@ export async function AppShell({ active, children }: { active: NexoSection; chil
 
       <nav aria-label="Navegación móvil" className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden">
         {navigation.slice(0, 5).map((item) => (
-          <a key={item.id} href={item.href} className={cn('flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[9px] font-semibold', active === item.id ? 'bg-[#10253d] text-white' : 'text-muted-foreground')}>
+          <Link key={item.id} href={item.href} className={cn('flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[9px] font-semibold', active === item.id ? 'bg-[#10253d] text-white' : 'text-muted-foreground')}>
             <item.icon className="size-4" /> {item.label}
-          </a>
+          </Link>
         ))}
       </nav>
     </main>
