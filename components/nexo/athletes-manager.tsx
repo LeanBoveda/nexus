@@ -1,0 +1,856 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Archive,
+  Check,
+  LoaderCircle,
+  Mail,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  UserRoundCheck,
+  UsersRound,
+} from 'lucide-react';
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from '@/components/ui/native-select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+
+type Athlete = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  birthDate: string | null;
+  countryCode: string | null;
+  primaryPosition: string | null;
+  primaryContext: string | null;
+  status: 'active' | 'paused';
+  groupNames: string;
+  groupCount: number;
+};
+
+type Group = { id: string; name: string; organizationName: string };
+
+export function AthletesManager() {
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Athlete | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Athlete | null>(null);
+  const [archiving, setArchiving] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setError('');
+    try {
+      const [athleteResponse, groupResponse] = await Promise.all([
+        fetch('/api/athletes', { cache: 'no-store' }),
+        fetch('/api/groups', { cache: 'no-store' }),
+      ]);
+      if (!athleteResponse.ok)
+        throw new Error('No pudimos cargar los clientes.');
+      const athleteResult = (await athleteResponse.json()) as {
+        athletes?: Athlete[];
+      };
+      const groupResult = groupResponse.ok
+        ? ((await groupResponse.json()) as { groups?: Group[] })
+        : { groups: [] };
+      setAthletes(athleteResult.athletes ?? []);
+      setGroups(groupResult.groups ?? []);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'No pudimos cargar los clientes.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const request = window.setTimeout(() => void loadData(), 0);
+    return () => window.clearTimeout(request);
+  }, [loadData]);
+
+  const availableGroups = useMemo(
+    () =>
+      Array.from(
+        new Set(athletes.flatMap((athlete) => splitGroups(athlete.groupNames))),
+      ).sort((left, right) => left.localeCompare(right, 'es')),
+    [athletes],
+  );
+
+  const filteredAthletes = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('es');
+    return athletes.filter((athlete) => {
+      const groupsForAthlete = splitGroups(athlete.groupNames);
+      const matchesSearch =
+        !query ||
+        [
+          athlete.firstName,
+          athlete.lastName,
+          athlete.email,
+          athlete.primaryPosition ?? '',
+          ...groupsForAthlete,
+        ]
+          .join(' ')
+          .toLocaleLowerCase('es')
+          .includes(query);
+      const matchesStatus =
+        statusFilter === 'all' || athlete.status === statusFilter;
+      const matchesGroup =
+        groupFilter === 'all' ||
+        (groupFilter === 'none'
+          ? groupsForAthlete.length === 0
+          : groupsForAthlete.includes(groupFilter));
+      return matchesSearch && matchesStatus && matchesGroup;
+    });
+  }, [athletes, groupFilter, search, statusFilter]);
+
+  function openCreate() {
+    setEditing(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(athlete: Athlete) {
+    setEditing(athlete);
+    setFormOpen(true);
+  }
+
+  async function archiveAthlete() {
+    if (!archiveTarget) return;
+    setArchiving(true);
+    setError('');
+    try {
+      const response = await fetch('/api/athletes', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: archiveTarget.id }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(
+          result.error ?? 'No pudimos dar de baja al deportista.',
+        );
+      setNotice(
+        `${archiveTarget.firstName} ${archiveTarget.lastName} fue dado de baja.`,
+      );
+      setArchiveTarget(null);
+      await loadData();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'No pudimos dar de baja al deportista.',
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  const activeCount = athletes.filter(
+    (athlete) => athlete.status === 'active',
+  ).length;
+  const pausedCount = athletes.filter(
+    (athlete) => athlete.status === 'paused',
+  ).length;
+  const withoutGroupCount = athletes.filter(
+    (athlete) => Number(athlete.groupCount) === 0,
+  ).length;
+
+  return (
+    <div className="mx-auto max-w-[1500px] px-5 py-6 sm:px-7 lg:px-9 lg:py-8">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Administración de clientes
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-[-0.04em] sm:text-[28px]">
+            Clientes y deportistas
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Altas, modificaciones y bajas desde una sola lista.
+          </p>
+        </div>
+        <Button
+          onClick={openCreate}
+          className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
+        >
+          <Plus /> Nuevo cliente
+        </Button>
+      </div>
+
+      {notice && (
+        <output className="mt-5 flex items-center gap-2 rounded-xl border border-[#cfe0ac] bg-[#f1f7e8] px-4 py-3 text-sm font-medium text-[#3f6110]">
+          <Check className="size-4" />
+          {notice}
+        </output>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-[#edc5bd] bg-[#fff1ee] px-4 py-3 text-sm text-[#963b2d]"
+        >
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={() => void loadData()}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <Summary
+          icon={UserRoundCheck}
+          label="Activos"
+          value={activeCount}
+          detail="Disponibles para asignaciones"
+        />
+        <Summary
+          icon={Archive}
+          label="Pausados"
+          value={pausedCount}
+          detail="Conservan todo su historial"
+        />
+        <Summary
+          icon={UsersRound}
+          label="Sin grupo"
+          value={withoutGroupCount}
+          detail="Pendientes de organización"
+          alert={withoutGroupCount > 0}
+        />
+      </div>
+
+      <Card className="mt-4 border-none bg-card py-0 ring-1 ring-border shadow-[0_18px_50px_-42px_#10253d]">
+        <div className="flex flex-col gap-3 border-b border-border px-4 py-3.5 lg:flex-row lg:items-center">
+          <label className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 text-muted-foreground lg:max-w-md">
+            <Search className="size-4" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="Buscar cliente"
+              placeholder="Buscar por nombre, email, posición o grupo…"
+              className="w-full bg-transparent text-sm text-foreground outline-none"
+            />
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2 lg:ml-auto">
+            <NativeSelect
+              value={groupFilter}
+              onChange={(event) => setGroupFilter(event.target.value)}
+              aria-label="Filtrar por grupo"
+              className="w-full sm:min-w-48"
+            >
+              <NativeSelectOption value="all">
+                Todos los grupos
+              </NativeSelectOption>
+              <NativeSelectOption value="none">Sin grupo</NativeSelectOption>
+              {availableGroups.map((group) => (
+                <NativeSelectOption key={group} value={group}>
+                  {group}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Filtrar por estado"
+              className="w-full sm:min-w-40"
+            >
+              <NativeSelectOption value="all">
+                Todos los estados
+              </NativeSelectOption>
+              <NativeSelectOption value="active">Activos</NativeSelectOption>
+              <NativeSelectOption value="paused">Pausados</NativeSelectOption>
+            </NativeSelect>
+          </div>
+        </div>
+        <CardContent className="px-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/35 hover:bg-muted/35">
+                  <TableHead className="pl-4 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Cliente
+                  </TableHead>
+                  <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Contacto
+                  </TableHead>
+                  <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Grupo
+                  </TableHead>
+                  <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Contexto
+                  </TableHead>
+                  <TableHead className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Estado
+                  </TableHead>
+                  <TableHead className="w-14" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <LoadingRows />
+                ) : filteredAthletes.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-52 text-center">
+                      <p className="font-semibold">
+                        {athletes.length === 0
+                          ? 'Todavía no cargaste clientes'
+                          : 'No encontramos coincidencias'}
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {athletes.length === 0
+                          ? 'Creá el primero para comenzar a organizar su trabajo.'
+                          : 'Probá cambiando la búsqueda o los filtros.'}
+                      </p>
+                      {athletes.length === 0 && (
+                        <Button
+                          onClick={openCreate}
+                          className="mt-4 bg-[#10253d] text-white hover:bg-[#183653]"
+                        >
+                          <Plus /> Crear primer cliente
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredAthletes.map((athlete) => {
+                    const groupNames = splitGroups(athlete.groupNames);
+                    return (
+                      <TableRow key={athlete.id}>
+                        <TableCell className="pl-4">
+                          <div className="flex items-center gap-3">
+                            <Avatar className="size-10">
+                              <AvatarFallback className="bg-[#eef2f5] text-xs font-bold text-[#29445e]">
+                                {initials(athlete)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="text-sm font-semibold">
+                                {athlete.firstName} {athlete.lastName}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {athlete.primaryPosition ??
+                                  'Sin posición definida'}
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <p className="flex items-center gap-1.5 text-sm">
+                            <Mail className="size-3.5 text-muted-foreground" />
+                            {athlete.email}
+                          </p>
+                          {athlete.phone && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {athlete.phone}
+                            </p>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {groupNames.length === 0 ? (
+                            <span className="text-sm text-muted-foreground">
+                              Sin grupo
+                            </span>
+                          ) : (
+                            <div className="flex max-w-xs flex-wrap gap-1">
+                              {groupNames.map((group) => (
+                                <Badge
+                                  key={group}
+                                  variant="outline"
+                                  className="bg-muted/35"
+                                >
+                                  {group}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {contextLabel(athlete.primaryContext)}
+                          {athlete.countryCode && (
+                            <span className="ml-1 text-muted-foreground">
+                              · {athlete.countryCode}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              athlete.status === 'active'
+                                ? 'border-[#cfe0ac] bg-[#f1f7e8] text-[#52751d]'
+                                : 'border-[#ead4a1] bg-[#fff8e8] text-[#876016]'
+                            }
+                          >
+                            {athlete.status === 'active' ? 'Activo' : 'Pausado'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="pr-4 text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={`Acciones de ${athlete.firstName} ${athlete.lastName}`}
+                                />
+                              }
+                            >
+                              <MoreHorizontal />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                onClick={() => openEdit(athlete)}
+                              >
+                                <Pencil /> Editar cliente
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setArchiveTarget(athlete)}
+                              >
+                                <Archive /> Dar de baja
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <AthleteFormDialog
+        key={editing?.id ?? 'new'}
+        open={formOpen}
+        athlete={editing}
+        groups={groups}
+        onOpenChange={setFormOpen}
+        onSaved={async (message) => {
+          setNotice(message);
+          setFormOpen(false);
+          await loadData();
+        }}
+      />
+
+      <AlertDialog
+        open={Boolean(archiveTarget)}
+        onOpenChange={(open) => !open && !archiving && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Dar de baja a {archiveTarget?.firstName}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se ocultará de las listas activas y dejará sus grupos. Sus
+              evaluaciones e historial se conservarán.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={archiving}
+              onClick={() => void archiveAthlete()}
+              className="bg-[#a23f30] text-white hover:bg-[#873327]"
+            >
+              {archiving ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <Archive />
+              )}{' '}
+              Confirmar baja
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function AthleteFormDialog({
+  open,
+  athlete,
+  groups,
+  onOpenChange,
+  onSaved,
+}: {
+  open: boolean;
+  athlete: Athlete | null;
+  groups: Group[];
+  onOpenChange: (open: boolean) => void;
+  onSaved: (message: string) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const editing = Boolean(athlete);
+
+  async function save(event: React.SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch('/api/athletes', {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: athlete?.id,
+          firstName: form.get('firstName'),
+          lastName: form.get('lastName'),
+          email: form.get('email'),
+          phone: form.get('phone'),
+          birthDate: form.get('birthDate'),
+          countryCode: form.get('countryCode'),
+          primaryContext: form.get('primaryContext'),
+          position: form.get('position'),
+          status: form.get('status'),
+          groupId: form.get('groupId'),
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(result.error ?? 'No pudimos guardar los cambios.');
+      await onSaved(
+        editing
+          ? 'Los datos del cliente fueron actualizados.'
+          : 'El nuevo cliente fue agregado.',
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'No pudimos guardar los cambios.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => !saving && onOpenChange(nextOpen)}
+    >
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {editing ? 'Editar cliente' : 'Nuevo cliente'}
+          </DialogTitle>
+          <DialogDescription>
+            {editing
+              ? 'Actualizá la información personal y su disponibilidad.'
+              : 'Completá los datos básicos para crear su ficha.'}
+          </DialogDescription>
+        </DialogHeader>
+        <form className="grid gap-4" onSubmit={save}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Nombre" htmlFor="client-first-name">
+              <Input
+                id="client-first-name"
+                name="firstName"
+                defaultValue={athlete?.firstName ?? ''}
+                required
+              />
+            </Field>
+            <Field label="Apellido" htmlFor="client-last-name">
+              <Input
+                id="client-last-name"
+                name="lastName"
+                defaultValue={athlete?.lastName ?? ''}
+                required
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Email" htmlFor="client-email">
+              <Input
+                id="client-email"
+                name="email"
+                type="email"
+                defaultValue={athlete?.email ?? ''}
+                required
+              />
+            </Field>
+            <Field label="Teléfono" htmlFor="client-phone">
+              <Input
+                id="client-phone"
+                name="phone"
+                type="tel"
+                defaultValue={athlete?.phone ?? ''}
+                placeholder="Opcional"
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Fecha de nacimiento" htmlFor="client-birth-date">
+              <Input
+                id="client-birth-date"
+                name="birthDate"
+                type="date"
+                defaultValue={athlete?.birthDate ?? ''}
+              />
+            </Field>
+            <Field label="País" htmlFor="client-country">
+              <Input
+                id="client-country"
+                name="countryCode"
+                defaultValue={athlete?.countryCode ?? 'AR'}
+                maxLength={2}
+                placeholder="AR"
+                className="uppercase"
+              />
+            </Field>
+            <Field label="Posición / rol" htmlFor="client-position">
+              <NativeSelect
+                id="client-position"
+                name="position"
+                defaultValue={athlete?.primaryPosition ?? ''}
+                className="w-full"
+              >
+                <NativeSelectOption value="">Sin definir</NativeSelectOption>
+                {[
+                  'Lateral',
+                  'Extremo',
+                  'Central',
+                  'Pivote',
+                  'Arquero',
+                  'Especialista beach',
+                  'Cliente gimnasio',
+                ].map((position) => (
+                  <NativeSelectOption key={position} value={position}>
+                    {position}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Contexto principal" htmlFor="client-context">
+              <NativeSelect
+                id="client-context"
+                name="primaryContext"
+                defaultValue={athlete?.primaryContext ?? ''}
+                className="w-full"
+              >
+                <NativeSelectOption value="">Sin definir</NativeSelectOption>
+                <NativeSelectOption value="national_team">
+                  Selección
+                </NativeSelectOption>
+                <NativeSelectOption value="club">Club</NativeSelectOption>
+                <NativeSelectOption value="gym">Gimnasio</NativeSelectOption>
+                <NativeSelectOption value="independent">
+                  Cliente particular
+                </NativeSelectOption>
+                <NativeSelectOption value="international">
+                  Exterior
+                </NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            {editing ? (
+              <Field label="Estado" htmlFor="client-status">
+                <NativeSelect
+                  id="client-status"
+                  name="status"
+                  defaultValue={athlete?.status ?? 'active'}
+                  className="w-full"
+                >
+                  <NativeSelectOption value="active">Activo</NativeSelectOption>
+                  <NativeSelectOption value="paused">
+                    Pausado
+                  </NativeSelectOption>
+                </NativeSelect>
+              </Field>
+            ) : (
+              <Field label="Grupo inicial" htmlFor="client-group">
+                <NativeSelect
+                  id="client-group"
+                  name="groupId"
+                  defaultValue=""
+                  className="w-full"
+                >
+                  <NativeSelectOption value="">
+                    Sin grupo por ahora
+                  </NativeSelectOption>
+                  {groups.map((group) => (
+                    <NativeSelectOption key={group.id} value={group.id}>
+                      {group.organizationName} · {group.name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
+          </div>
+          {editing && (
+            <p className="rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              La pertenencia a planteles se modifica desde la sección Grupos.
+            </p>
+          )}
+          {error && (
+            <p
+              role="alert"
+              className="rounded-xl bg-[#fff0ed] px-3 py-2.5 text-sm font-medium text-[#a23f30]"
+            >
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving}
+              className="bg-[#10253d] text-white hover:bg-[#183653]"
+            >
+              {saving ? <LoaderCircle className="animate-spin" /> : <Check />}
+              {saving
+                ? 'Guardando…'
+                : editing
+                  ? 'Guardar cambios'
+                  : 'Crear cliente'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function LoadingRows() {
+  return (
+    <>
+      {Array.from({ length: 4 }, (_, index) => (
+        <TableRow key={index}>
+          <TableCell colSpan={6} className="px-4 py-4">
+            <div className="h-10 animate-pulse rounded-xl bg-muted" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+function Summary({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  alert = false,
+}: {
+  icon: typeof UserRoundCheck;
+  label: string;
+  value: number;
+  detail: string;
+  alert?: boolean;
+}) {
+  return (
+    <Card className="border-none bg-card ring-1 ring-border">
+      <CardContent className="flex items-center gap-4">
+        <span
+          className={`grid size-11 shrink-0 place-items-center rounded-2xl ${alert ? 'bg-[#fff0ed] text-[#a23f30]' : 'bg-[#edf4e1] text-[#52751d]'}`}
+        >
+          <Icon className="size-5" />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            {label}
+          </p>
+          <p className="mt-1 text-2xl font-bold tracking-[-0.04em]">{value}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function splitGroups(value: string) {
+  return value ? value.split('|||').filter(Boolean) : [];
+}
+
+function initials(athlete: Athlete) {
+  return `${athlete.firstName[0] ?? ''}${athlete.lastName[0] ?? ''}`.toUpperCase();
+}
+
+function contextLabel(value: string | null) {
+  if (value === 'national_team') return 'Selección';
+  if (value === 'club') return 'Club';
+  if (value === 'gym') return 'Gimnasio';
+  if (value === 'independent') return 'Particular';
+  if (value === 'international') return 'Exterior';
+  return 'Sin definir';
+}
