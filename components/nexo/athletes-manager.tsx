@@ -1,15 +1,21 @@
 'use client';
 
+/* eslint-disable next/no-html-link-for-pages -- Vinext's Link runtime currently throws during RSC prefetch. */
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   Check,
+  Copy,
+  Eye,
+  Link2,
   LoaderCircle,
   Mail,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
+  ShieldCheck,
   UserRoundCheck,
   UsersRound,
 } from 'lucide-react';
@@ -87,6 +93,11 @@ export function AthletesManager() {
   const [editing, setEditing] = useState<Athlete | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Athlete | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [accessTarget, setAccessTarget] = useState<Athlete | null>(null);
+  const [accessUrl, setAccessUrl] = useState('');
+  const [accessError, setAccessError] = useState('');
+  const [generatingAccess, setGeneratingAccess] = useState(false);
+  const [accessCopied, setAccessCopied] = useState(false);
 
   const loadData = useCallback(async () => {
     setError('');
@@ -197,6 +208,49 @@ export function AthletesManager() {
     }
   }
 
+  function openAccess(athlete: Athlete) {
+    setAccessTarget(athlete);
+    setAccessUrl('');
+    setAccessError('');
+    setAccessCopied(false);
+  }
+
+  async function generateAccess() {
+    if (!accessTarget) return;
+    setGeneratingAccess(true);
+    setAccessError('');
+    setAccessCopied(false);
+    try {
+      const response = await fetch('/api/athletes/access', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ athleteId: accessTarget.id }),
+      });
+      const result = (await response.json()) as {
+        url?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.url) {
+        throw new Error(result.error ?? 'No pudimos generar el acceso.');
+      }
+      setAccessUrl(result.url);
+    } catch (caught) {
+      setAccessError(
+        caught instanceof Error
+          ? caught.message
+          : 'No pudimos generar el acceso.',
+      );
+    } finally {
+      setGeneratingAccess(false);
+    }
+  }
+
+  async function copyAccess() {
+    if (!accessUrl) return;
+    await navigator.clipboard.writeText(accessUrl);
+    setAccessCopied(true);
+  }
+
   const activeCount = athletes.filter(
     (athlete) => athlete.status === 'active',
   ).length;
@@ -221,12 +275,20 @@ export function AthletesManager() {
             Altas, modificaciones y bajas desde una sola lista.
           </p>
         </div>
-        <Button
-          onClick={openCreate}
-          className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
-        >
-          <Plus /> Nuevo cliente
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="/mi-entrenamiento"
+            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-card px-3.5 text-sm font-semibold transition hover:bg-muted"
+          >
+            <Eye className="size-4" /> Vista deportista
+          </a>
+          <Button
+            onClick={openCreate}
+            className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
+          >
+            <Plus /> Nuevo cliente
+          </Button>
+        </div>
       </div>
 
       {notice && (
@@ -449,6 +511,11 @@ export function AthletesManager() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
                               <DropdownMenuItem
+                                onClick={() => openAccess(athlete)}
+                              >
+                                <Link2 /> Crear acceso móvil
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 onClick={() => openEdit(athlete)}
                               >
                                 <Pencil /> Editar cliente
@@ -484,6 +551,110 @@ export function AthletesManager() {
           await loadData();
         }}
       />
+
+      <Dialog
+        open={Boolean(accessTarget)}
+        onOpenChange={(open) => {
+          if (!open && !generatingAccess) setAccessTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Acceso de {accessTarget?.firstName} {accessTarget?.lastName}
+            </DialogTitle>
+            <DialogDescription>
+              Generá un enlace personal para que ingrese desde su teléfono sin
+              contraseña.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-2xl border border-[#dbe4d4] bg-[#f3f7ed] p-4">
+            <div className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#dff0b9] text-[#52751d]">
+                <ShieldCheck className="size-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">
+                  Enlace seguro de un solo uso
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Vence en 7 días. Al usarlo, la sesión queda iniciada en ese
+                  dispositivo. Crear uno nuevo invalida el anterior.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {accessUrl ? (
+            <div className="space-y-3">
+              <Label htmlFor="athlete-access-url">Enlace para enviar</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="athlete-access-url"
+                  value={accessUrl}
+                  readOnly
+                  className="font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void copyAccess()}
+                >
+                  {accessCopied ? <Check /> : <Copy />}
+                  {accessCopied ? 'Copiado' : 'Copiar'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Copialo y enviáselo al deportista. No lo abras desde tu cuenta
+                de preparador físico.
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Cuando lo generes, sólo tendrás que copiarlo y compartirlo por el
+              medio que uses habitualmente.
+            </p>
+          )}
+
+          {accessError && (
+            <p
+              role="alert"
+              className="rounded-xl bg-[#fff0ed] px-3 py-2.5 text-sm font-medium text-[#a23f30]"
+            >
+              {accessError}
+            </p>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={generatingAccess}
+              onClick={() => setAccessTarget(null)}
+            >
+              Cerrar
+            </Button>
+            <Button
+              type="button"
+              disabled={generatingAccess}
+              onClick={() => void generateAccess()}
+              className="bg-[#10253d] text-white hover:bg-[#183653]"
+            >
+              {generatingAccess ? (
+                <LoaderCircle className="animate-spin" />
+              ) : (
+                <Link2 />
+              )}
+              {generatingAccess
+                ? 'Generando…'
+                : accessUrl
+                  ? 'Generar uno nuevo'
+                  : 'Generar acceso'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={Boolean(archiveTarget)}

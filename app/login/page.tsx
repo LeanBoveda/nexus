@@ -6,7 +6,8 @@ import { getAuthStatus, getSession } from '@/lib/auth';
 export const dynamic = 'force-dynamic';
 
 export default async function LoginPage() {
-  if (await getSession()) redirect('/');
+  const user = await getSession();
+  if (user) redirect(user.role === 'athlete' ? '/mi-entrenamiento' : '/');
   const { setupRequired } = await getAuthStatus();
   return <LoginForm setupRequired={setupRequired} />;
 }

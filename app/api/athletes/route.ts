@@ -1,10 +1,10 @@
 import { getD1 } from '@/db';
-import { getSessionFromRequest, isSameOrigin } from '@/lib/auth';
+import { getStaffSessionFromRequest, isSameOrigin } from '@/lib/auth';
 
 export const runtime = 'edge';
 
 export async function GET(request: Request) {
-  if (!(await getSessionFromRequest(request)))
+  if (!(await getStaffSessionFromRequest(request)))
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const athletes = await getD1()
     .prepare(
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await getSessionFromRequest(request)))
+  if (!(await getStaffSessionFromRequest(request)))
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!(await getSessionFromRequest(request)))
+  if (!(await getStaffSessionFromRequest(request)))
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
@@ -182,7 +182,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await getSessionFromRequest(request)))
+  if (!(await getStaffSessionFromRequest(request)))
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });

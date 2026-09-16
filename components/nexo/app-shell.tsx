@@ -14,6 +14,7 @@ import {
   UsersRound,
   Zap,
 } from 'lucide-react';
+import { redirect } from 'next/navigation';
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { buttonVariants } from '@/components/ui/button';
@@ -76,6 +77,7 @@ export async function AppShell({
   children: React.ReactNode;
 }) {
   const user = await requireSession();
+  if (user.role === 'athlete') redirect('/mi-entrenamiento');
   const initials = user.name
     .split(/\s+/)
     .slice(0, 2)
