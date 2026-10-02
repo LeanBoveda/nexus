@@ -1,122 +1,93 @@
-import {
-  ArrowUpRight,
-  ClipboardCheck,
-  ClipboardPlus,
-  Clock3,
-  Gauge,
-  MoreHorizontal,
-  TimerReset,
-  TriangleAlert,
-  UserRoundCheck,
-  Users,
-  Zap,
-} from 'lucide-react';
+/* eslint-disable next/no-html-link-for-pages -- Vinext production navigation uses native links. */
+import { ArrowUpRight, ClipboardCheck, ClipboardPlus, Dumbbell, Gauge, TriangleAlert, UserRoundCheck, Users, UsersRound } from 'lucide-react';
 
 import { AppShell } from '@/components/nexo/app-shell';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants, Button } from '@/components/ui/button';
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { buttonVariants } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getD1 } from '@/db';
+import { requireSession } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
-const attentionItems = [
-  { id: 'lucia-mendez', initials: 'LM', name: 'Lucía Méndez', detail: 'PSE mayor al esperado en 3 sesiones', tag: 'Revisar carga', tone: 'amber' },
-  { id: 'tomas-silva', initials: 'TS', name: 'Tomás Silva', detail: 'Reportó molestia en hombro derecho', tag: 'Molestia', tone: 'red' },
-  { id: 'martina-ruiz', initials: 'MR', name: 'Martina Ruiz', detail: 'Sin registrar actividad hace 5 días', tag: 'Seguimiento', tone: 'slate' },
-];
+export const dynamic = 'force-dynamic';
 
-const schedule = [
-  { time: '09:00', title: 'Fuerza · Plantel beach', meta: '18 deportistas · Arena' },
-  { time: '11:30', title: 'Evaluaciones U21', meta: 'Sprint 15 m + CMJ' },
-  { time: '17:00', title: 'Gimnasio · Grupo tarde', meta: '8 deportistas · Fuerza' },
-];
+type CountRow = { count: number };
 
-export default function Home() {
+export default async function Home() {
+  const user = await requireSession();
+  const db = getD1();
+  const monthAgo = 30 * 24 * 60 * 60 * 1000;
+  const fortnight = 14 * 24 * 60 * 60 * 1000;
+  const [athletes, groups, routines, evaluations, weeklyLogs, attention] = await Promise.all([
+    db.prepare("SELECT COUNT(*) AS count FROM athletes WHERE status = 'active'").first<CountRow>(),
+    db.prepare('SELECT COUNT(*) AS count FROM groups WHERE active = 1').first<CountRow>(),
+    db.prepare("SELECT COUNT(*) AS count FROM routines WHERE status = 'published'").first<CountRow>(),
+    db.prepare('SELECT COUNT(*) AS count FROM evaluation_sessions WHERE evaluated_at >= (unixepoch() * 1000 - ?)').bind(monthAgo).first<CountRow>(),
+    db.prepare(`SELECT COUNT(*) AS count FROM workout_logs
+      WHERE completed_at >= (unixepoch() * 1000 - 7 * 24 * 60 * 60 * 1000)`).first<CountRow>(),
+    db.prepare(`SELECT a.id, a.first_name AS firstName, a.last_name AS lastName,
+      wl.pse, wl.pain, wl.notes, wl.completed_at AS completedAt, r.name AS routineName
+      FROM workout_logs wl
+      JOIN athletes a ON a.id = wl.athlete_id
+      JOIN athlete_routine_instances ari ON ari.id = wl.instance_id
+      JOIN routine_assignments ra ON ra.id = ari.assignment_id
+      JOIN routine_versions rv ON rv.id = ra.routine_version_id
+      JOIN routines r ON r.id = rv.routine_id
+      WHERE wl.completed_at >= (unixepoch() * 1000 - ?)
+        AND (wl.pain >= 4 OR wl.pse >= 8)
+      ORDER BY wl.completed_at DESC LIMIT 8`).bind(fortnight).all<{
+        id: string; firstName: string; lastName: string; pse: number | null; pain: number | null; notes: string | null; completedAt: number; routineName: string;
+      }>(),
+  ]);
+
   return (
     <AppShell active="inicio">
       <div className="mx-auto max-w-[1500px] px-5 py-6 sm:px-7 lg:px-9 lg:py-8">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-              <span>Martes, 1 de septiembre</span><span className="size-1 rounded-full bg-border" /><span>Semana competitiva 3</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-[-0.04em] sm:text-[28px]">Buen día, Manuel</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Tu operación deportiva, ordenada para hoy.</p>
+            <div className="mb-2 text-xs font-medium text-muted-foreground">{new Intl.DateTimeFormat('es-AR', { dateStyle: 'full', timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date())}</div>
+            <h1 className="text-2xl font-bold tracking-[-0.04em] sm:text-[28px]">Buen día, {firstName(user.name)}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Este es el estado real de tu operación deportiva.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <a href="/evaluaciones" className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-9 rounded-xl bg-card')}><ClipboardPlus className="size-4" /> Cargar evaluación</a>
-            <a href="/deportistas" className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-9 rounded-xl bg-card')}><UserRoundCheck className="size-4" /> Nuevo deportista</a>
-          </div>
+          <div className="flex flex-wrap gap-2"><a href="/evaluaciones" className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-9 rounded-xl bg-card')}><ClipboardPlus className="size-4" /> Cargar evaluación</a><a href="/deportistas" className={cn(buttonVariants({ variant: 'outline', size: 'lg' }), 'h-9 rounded-xl bg-card')}><UserRoundCheck className="size-4" /> Nuevo deportista</a></div>
         </div>
 
         <div className="mt-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Card className="border-none bg-[#10253d] text-white ring-0 shadow-[0_20px_50px_-34px_#10253d]">
-            <CardHeader>
-              <CardDescription className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/50">Deportistas activos</CardDescription>
-              <CardAction className="grid size-8 place-items-center rounded-lg bg-white/10"><Users className="size-4 text-[#c8f15a]" /></CardAction>
-            </CardHeader>
-            <CardContent><div className="flex items-end justify-between"><span className="text-3xl font-bold tracking-[-0.06em]">84</span><span className="mb-1 flex items-center gap-1 text-[11px] text-[#c8f15a]"><ArrowUpRight className="size-3" /> 6 este mes</span></div></CardContent>
-          </Card>
-          <MetricCard icon={Gauge} label="Cumplimiento semanal" value="86%" detail="+4,2% vs. semana anterior" accent="lime" />
-          <MetricCard icon={ClipboardCheck} label="Evaluaciones pendientes" value="12" detail="5 llevan más de 30 días" accent="amber" />
-          <MetricCard icon={TriangleAlert} label="Requieren atención" value="7" detail="2 molestias nuevas hoy" accent="coral" />
+          <MetricCard icon={Users} label="Deportistas activos" value={Number(athletes?.count ?? 0)} detail="Perfiles habilitados" accent="navy" href="/deportistas" />
+          <MetricCard icon={UsersRound} label="Grupos activos" value={Number(groups?.count ?? 0)} detail="Clubes, selecciones y grupos" accent="lime" href="/grupos" />
+          <MetricCard icon={Dumbbell} label="Rutinas activas" value={Number(routines?.count ?? 0)} detail="Planificaciones publicadas" accent="blue" href="/rutinas" />
+          <MetricCard icon={ClipboardCheck} label="Evaluaciones · 30 días" value={Number(evaluations?.count ?? 0)} detail="Sesiones de testeo registradas" accent="amber" href="/evaluaciones" />
         </div>
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(330px,0.75fr)]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
           <Card className="border-none bg-card ring-1 ring-border shadow-[0_18px_50px_-42px_#10253d]">
-            <CardHeader className="border-b border-border/70 pb-4">
-              <CardTitle className="text-[15px] font-bold tracking-tight">Requieren atención</CardTitle>
-              <CardDescription className="text-xs">Señales recientes que conviene revisar</CardDescription>
-              <CardAction><a href="/deportistas" className={buttonVariants({ variant: 'ghost', size: 'sm' })}>Ver todos</a></CardAction>
-            </CardHeader>
+            <CardHeader className="border-b border-border/70 pb-4"><CardTitle className="text-[15px] font-bold">Señales para revisar</CardTitle><CardDescription>Dolor igual o mayor a 4, o PSE igual o mayor a 8, en los últimos 14 días.</CardDescription></CardHeader>
             <CardContent className="divide-y divide-border/70 px-0">
-              {attentionItems.map((item) => (
-                <a key={item.name} href={`/deportistas/${item.id}`} className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-muted/40">
-                  <Avatar className="size-9"><AvatarFallback className="bg-[#eef2f5] text-[11px] font-bold text-[#29445e]">{item.initials}</AvatarFallback></Avatar>
-                  <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold">{item.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</p></div>
-                  <Badge variant="outline" className={item.tone === 'red' ? 'border-[#f2b9ae] bg-[#fff2ef] text-[#b34231]' : item.tone === 'amber' ? 'border-[#ead4a1] bg-[#fff8e8] text-[#876016]' : 'border-[#d8e0e6] bg-[#f4f7f8] text-[#526573]'}>{item.tag}</Badge>
-                  <ArrowUpRight className="size-3.5 text-muted-foreground" />
-                </a>
-              ))}
+              {attention.results.length > 0 ? attention.results.map((item, index) => {
+                const painAlert = Number(item.pain ?? 0) >= 4;
+                return <a key={`${item.id}-${item.completedAt}-${index}`} href={`/deportistas/${encodeURIComponent(item.id)}`} className="flex items-center gap-3 px-4 py-3.5 transition hover:bg-muted/40"><Avatar className="size-9"><AvatarFallback className="bg-[#eef2f5] text-[11px] font-bold text-[#29445e]">{initials(item.firstName, item.lastName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold">{item.firstName} {item.lastName}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.routineName} · {shortDate(item.completedAt)}{item.notes ? ` · ${item.notes}` : ''}</p></div><Badge variant="outline" className={painAlert ? 'border-[#f2b9ae] bg-[#fff2ef] text-[#b34231]' : 'border-[#ead4a1] bg-[#fff8e8] text-[#876016]'}>{painAlert ? `Dolor ${item.pain}` : `PSE ${item.pse}`}</Badge><ArrowUpRight className="size-3.5 text-muted-foreground" /></a>;
+              }) : <div className="grid min-h-64 place-items-center p-6 text-center"><div><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-[#edf4e1] text-[#52751d]"><Gauge className="size-5" /></span><p className="mt-3 font-semibold">Sin alertas recientes</p><p className="mt-1 text-xs text-muted-foreground">Las señales aparecerán cuando los deportistas registren PSE o molestias elevadas.</p></div></div>}
             </CardContent>
           </Card>
 
-          <Card className="border-none bg-card ring-1 ring-border shadow-[0_18px_50px_-42px_#10253d]">
-            <CardHeader className="border-b border-border/70 pb-4">
-              <CardTitle className="text-[15px] font-bold tracking-tight">Agenda de hoy</CardTitle><CardDescription className="text-xs">3 actividades programadas</CardDescription>
-              <CardAction><Button variant="ghost" size="icon-sm" aria-label="Más opciones"><MoreHorizontal /></Button></CardAction>
-            </CardHeader>
-            <CardContent className="space-y-1 px-3">
-              {schedule.map((item, index) => (
-                <div key={item.time} className="grid grid-cols-[48px_1fr] gap-3 rounded-xl px-2 py-2.5 hover:bg-muted/50">
-                  <div className="pt-0.5 text-[11px] font-semibold text-muted-foreground">{item.time}</div>
-                  <div className="relative border-l border-border pl-3"><span className={`absolute -left-[4.5px] top-1 size-2 rounded-full ring-2 ring-card ${index === 0 ? 'bg-[#9fcf2d]' : index === 1 ? 'bg-[#e8ad35]' : 'bg-[#5c7f9e]'}`} /><p className="text-[12px] font-semibold">{item.title}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{item.meta}</p></div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <div className="space-y-4">
+            <Card className="border-none bg-[#10253d] text-white ring-0"><CardHeader><CardDescription className="text-white/50">Actividad reciente</CardDescription><CardTitle className="text-3xl font-bold">{Number(weeklyLogs?.count ?? 0)}</CardTitle></CardHeader><CardContent><p className="text-sm text-white/65">sesiones completadas durante los últimos 7 días.</p></CardContent></Card>
+            <Card className="border-none bg-card ring-1 ring-border"><CardHeader><CardTitle className="text-[15px] font-bold">Acciones rápidas</CardTitle></CardHeader><CardContent className="space-y-2"><QuickLink href="/rutinas/nueva" icon={Dumbbell} label="Crear planificación" /><QuickLink href="/grupos" icon={UsersRound} label="Organizar planteles" /><QuickLink href="/evaluaciones" icon={ClipboardCheck} label="Registrar testeo" /><QuickLink href="/deportistas" icon={Users} label="Administrar clientes" /></CardContent></Card>
+          </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <Card className="border-none bg-[#edf4e1] ring-0">
-            <CardContent className="grid gap-5 py-1 sm:grid-cols-[1fr_auto] sm:items-center">
-              <div><div className="mb-2 flex items-center gap-2"><span className="grid size-7 place-items-center rounded-lg bg-[#d9ecae] text-[#3f6110]"><Zap className="size-3.5" /></span><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#52751d]">Progreso destacado</span></div><p className="text-sm font-bold text-[#21320e]">Plantel Beach · Potencia de salto</p><p className="mt-1 max-w-md text-xs leading-relaxed text-[#587034]">El promedio de CMJ mejoró 6,8% desde la primera concentración.</p></div>
-              <div className="flex items-center gap-3"><span className="text-[32px] font-bold tracking-[-0.06em] text-[#3f6110]">+6,8%</span><a href="/evaluaciones" aria-label="Ver evaluación" className={cn(buttonVariants({ variant: 'outline', size: 'icon' }), 'border-[#c5db99] bg-white/65 text-[#3f6110] hover:bg-white')}><ArrowUpRight /></a></div>
-            </CardContent>
-          </Card>
-          <Card className="border-none bg-card ring-1 ring-border">
-            <CardHeader><CardTitle className="text-[14px] font-bold">Carga del plantel</CardTitle><CardDescription className="text-xs">Sesiones completadas esta semana</CardDescription><CardAction><Badge variant="outline" className="bg-muted/50">Selección Beach</Badge></CardAction></CardHeader>
-            <CardContent><div className="flex items-end justify-between gap-4"><div><span className="text-2xl font-bold tracking-tight">42 / 48</span><p className="mt-1 text-[11px] text-muted-foreground">6 registros pendientes</p></div><div className="flex items-center gap-1.5 text-[11px] font-medium text-[#58751a]"><TimerReset className="size-3.5" /> 87,5%</div></div><Progress value={87.5} className="mt-4 [&_[data-slot=progress-indicator]]:bg-[#9fcf2d] [&_[data-slot=progress-track]]:h-2" /></CardContent>
-          </Card>
-        </div>
-        <div className="mt-5 flex items-center justify-between border-t border-border/70 pt-4 text-[11px] text-muted-foreground"><span>Última actualización hace 4 minutos</span><span className="flex items-center gap-1.5"><Clock3 className="size-3" /> Zona horaria: Buenos Aires</span></div>
+        <Card className="mt-4 border-none bg-[#fff5dc] ring-0"><CardContent className="flex items-start gap-4"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/60 text-[#9a6b12]"><TriangleAlert className="size-4" /></span><div><p className="font-semibold">Los indicadores dependen de los registros reales</p><p className="mt-1 text-sm text-[#755718]">Asigná rutinas y compartí el acceso móvil para que los datos de cumplimiento, PSE y dolor se actualicen desde cada deportista.</p></div></CardContent></Card>
       </div>
     </AppShell>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail, accent }: { icon: typeof Gauge; label: string; value: string; detail: string; accent: 'lime' | 'amber' | 'coral' }) {
-  const styles = { lime: 'bg-[#edf4e1] text-[#52751d]', amber: 'bg-[#fff5dc] text-[#9a6b12]', coral: 'bg-[#fff0ec] text-[#c14d38]' };
-  return <Card className="border-none bg-card ring-1 ring-border shadow-[0_18px_50px_-42px_#10253d]"><CardHeader><CardDescription className="text-[11px] font-semibold uppercase tracking-[0.11em]">{label}</CardDescription><CardAction className={`grid size-8 place-items-center rounded-lg ${styles[accent]}`}><Icon className="size-4" /></CardAction></CardHeader><CardContent><span className="text-3xl font-bold tracking-[-0.06em]">{value}</span><p className="mt-2 text-[11px] text-muted-foreground">{detail}</p></CardContent></Card>;
+function MetricCard({ icon: Icon, label, value, detail, accent, href }: { icon: typeof Gauge; label: string; value: number; detail: string; accent: 'navy' | 'lime' | 'blue' | 'amber'; href: string }) {
+  const styles = { navy: 'bg-[#10253d] text-white', lime: 'bg-[#edf4e1] text-[#52751d]', blue: 'bg-[#eef4f8] text-[#315a78]', amber: 'bg-[#fff5dc] text-[#9a6b12]' };
+  return <a href={href} aria-label={`Ver ${label}`}><Card className="h-full border-none bg-card ring-1 ring-border transition hover:-translate-y-0.5 hover:shadow-lg"><CardContent className="flex items-center gap-4"><span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${styles[accent]}`}><Icon className="size-5" /></span><div className="min-w-0"><p className="text-2xl font-bold tracking-[-0.04em]">{value}</p><p className="text-xs font-semibold">{label}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">{detail}</p></div></CardContent></Card></a>;
 }
+function QuickLink({ href, icon: Icon, label }: { href: string; icon: typeof Gauge; label: string }) { return <a href={href} className="flex items-center gap-3 rounded-xl border border-border p-3 text-sm font-semibold transition hover:border-[#b8d477] hover:bg-[#f5f9ed]"><span className="grid size-8 place-items-center rounded-lg bg-muted"><Icon className="size-4" /></span><span className="flex-1">{label}</span><ArrowUpRight className="size-3.5 text-muted-foreground" /></a>; }
+function firstName(name: string) { return name.trim().split(/\s+/)[0] || 'PF'; }
+function initials(first: string, last: string) { return `${first[0] ?? ''}${last[0] ?? ''}`.toUpperCase(); }
+function shortDate(timestamp: number) { return new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: 'short' }).format(new Date(timestamp)); }

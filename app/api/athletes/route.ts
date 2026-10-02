@@ -212,6 +212,21 @@ export async function DELETE(request: Request) {
         'UPDATE group_memberships SET ended_at = ? WHERE athlete_id = ? AND ended_at IS NULL',
       )
       .bind(now, id),
+    db
+      .prepare(
+        `UPDATE athlete_routine_instances SET status = 'cancelled'
+        WHERE athlete_id = ? AND status IN ('scheduled', 'active')`,
+      )
+      .bind(id),
+    db
+      .prepare(
+        `UPDATE athlete_access_links SET redeemed_at = ?
+        WHERE athlete_id = ? AND redeemed_at IS NULL`,
+      )
+      .bind(now, id),
+    db
+      .prepare("UPDATE users SET status = 'disabled' WHERE athlete_id = ? AND role = 'athlete'")
+      .bind(id),
   ]);
   return Response.json({ ok: true });
 }

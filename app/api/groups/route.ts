@@ -142,15 +142,48 @@ export async function POST(request: Request) {
           { error: 'Seleccioná al menos una persona.' },
           { status: 400 },
         );
-      await db.batch(
-        athleteIds.map((athleteId) =>
+      const assignments = await db
+        .prepare(
+          `SELECT ra.id, ra.starts_on AS startsOn
+          FROM routine_assignments ra
+          JOIN routine_versions rv ON rv.id = ra.routine_version_id
+          JOIN routines r ON r.id = rv.routine_id
+          WHERE ra.target_type = 'group' AND ra.target_id = ?
+            AND r.status = 'published'
+            AND (ra.ends_on IS NULL OR ra.ends_on >= date('now'))`,
+        )
+        .bind(input.groupId)
+        .all<{ id: string; startsOn: string }>();
+      const now = Date.now();
+      const today = new Date().toISOString().slice(0, 10);
+      await db.batch([
+        ...athleteIds.map((athleteId) =>
           db
             .prepare(`INSERT INTO group_memberships
         (athlete_id, group_id, role, joined_at, ended_at) VALUES (?, ?, NULL, ?, NULL)
         ON CONFLICT(athlete_id, group_id) DO UPDATE SET ended_at = NULL`)
-            .bind(athleteId, input.groupId, Date.now()),
+            .bind(athleteId, input.groupId, now),
         ),
-      );
+        ...assignments.results.flatMap((assignment) =>
+          athleteIds.map((athleteId) =>
+            db
+              .prepare(
+                `INSERT INTO athlete_routine_instances
+                (id, assignment_id, athlete_id, overrides, status, created_at)
+                VALUES (?, ?, ?, NULL, ?, ?)
+                ON CONFLICT(assignment_id, athlete_id) DO UPDATE SET
+                  status = excluded.status`,
+              )
+              .bind(
+                crypto.randomUUID(),
+                assignment.id,
+                athleteId,
+                assignment.startsOn <= today ? 'active' : 'scheduled',
+                now,
+              ),
+          ),
+        ),
+      ]);
       return Response.json({ ok: true });
     }
 
@@ -160,21 +193,42 @@ export async function POST(request: Request) {
           { error: 'Faltan datos para quitar la persona.' },
           { status: 400 },
         );
-      await db
-        .prepare(`UPDATE group_memberships SET ended_at = ?
-        WHERE group_id = ? AND athlete_id = ? AND ended_at IS NULL`)
-        .bind(Date.now(), input.groupId, input.athleteId)
-        .run();
+      await db.batch([
+        db
+          .prepare(`UPDATE group_memberships SET ended_at = ?
+          WHERE group_id = ? AND athlete_id = ? AND ended_at IS NULL`)
+          .bind(Date.now(), input.groupId, input.athleteId),
+        db
+          .prepare(
+            `UPDATE athlete_routine_instances SET status = 'cancelled'
+            WHERE athlete_id = ? AND status IN ('scheduled', 'active')
+              AND assignment_id IN (
+                SELECT id FROM routine_assignments
+                WHERE target_type = 'group' AND target_id = ?
+              )`,
+          )
+          .bind(input.athleteId, input.groupId),
+      ]);
       return Response.json({ ok: true });
     }
 
     if (input.action === 'archive') {
       if (!input.groupId)
         return Response.json({ error: 'Grupo inválido.' }, { status: 400 });
-      await db
-        .prepare('UPDATE groups SET active = 0 WHERE id = ?')
-        .bind(input.groupId)
-        .run();
+      await db.batch([
+        db
+          .prepare('UPDATE groups SET active = 0 WHERE id = ?')
+          .bind(input.groupId),
+        db
+          .prepare(
+            `UPDATE athlete_routine_instances SET status = 'cancelled'
+            WHERE status IN ('scheduled', 'active') AND assignment_id IN (
+              SELECT id FROM routine_assignments
+              WHERE target_type = 'group' AND target_id = ?
+            )`,
+          )
+          .bind(input.groupId),
+      ]);
       return Response.json({ ok: true });
     }
 

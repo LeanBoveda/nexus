@@ -1,3 +1,5 @@
+import { getD1 } from '@/db';
+
 export type PortalExercise = {
   id: string;
   block: string;
@@ -58,123 +60,6 @@ export type AthletePortalData = {
   };
   evaluations: PortalEvaluation[];
 };
-
-export function previewPortalData(): AthletePortalData {
-  return {
-    athlete: {
-      id: 'preview-athlete',
-      firstName: 'Valentina',
-      lastName: 'Costa',
-      email: 'valentina@nexo.demo',
-      position: 'Especialista beach',
-      countryCode: 'AR',
-      groups: ['Selección Beach'],
-    },
-    routine: {
-      instanceId: 'preview-instance',
-      name: 'Competitivo 1',
-      description: 'Ciclo de fuerza y potencia específico para handball.',
-      sessionName: 'Día A · Full body',
-      warmup: 'Movilidad, core y preventivos de hombro antes de comenzar.',
-      instructions:
-        'Priorizá la calidad técnica. Ajustá la carga si aparece molestia de hombro.',
-      sessionKey: 'preview-week-14-day-a',
-      targetPse: 6,
-      weeklyGoal: 3,
-      exercises: [
-        {
-          id: '1',
-          block: 'A',
-          category: 'Potencia',
-          name: 'Arranque desde cajón',
-          target: '3 · 3 · 3',
-          rir: '3',
-        },
-        {
-          id: '2',
-          block: 'A',
-          category: 'Control',
-          name: 'Caminata con trineo · tensión unilateral',
-          target: '12 + 12 m',
-          rir: '—',
-        },
-        {
-          id: '3',
-          block: 'B',
-          category: 'Fuerza',
-          name: 'Peso muerto',
-          target: '4 · 4 · 3',
-          rir: '3',
-        },
-        {
-          id: '4',
-          block: 'B',
-          category: 'Velocidad',
-          name: 'Sprint con chaleco 8 kg',
-          target: '15 m',
-          rir: '—',
-        },
-        {
-          id: '5',
-          block: 'C',
-          category: 'Fuerza',
-          name: 'Press banco plano',
-          target: '5 · 5 · 4 · 4',
-          rir: '3',
-        },
-      ],
-      weeks: [
-        {
-          number: '12',
-          phase: 'Ajuste',
-          objective: 'Fuerza estructural',
-          secondary: 'Fuerza potencia',
-          pse: '5',
-          status: 'completed',
-        },
-        {
-          number: '13',
-          phase: 'Carga',
-          objective: 'Fuerza estructural',
-          secondary: 'Fuerza potencia',
-          pse: '6',
-          status: 'completed',
-        },
-        {
-          number: '14',
-          phase: 'Carga',
-          objective: 'Fuerza máxima',
-          secondary: 'Fuerza potencia',
-          pse: '6',
-          status: 'current',
-        },
-        {
-          number: '15',
-          phase: 'Descarga',
-          objective: 'Fuerza estructural',
-          secondary: 'Fuerza potencia',
-          pse: '4',
-          status: 'upcoming',
-        },
-      ],
-    },
-    progress: {
-      completedExerciseIds: ['1', '2'],
-      weeklySessions: 2,
-      weeklyGoal: 3,
-      streak: 4,
-      pse: null,
-      pain: null,
-      notes: '',
-      completedAt: null,
-    },
-    evaluations: [
-      { label: 'CMJ', value: '43,2 cm', change: 6.8, positive: true },
-      { label: 'Sprint 15 m', value: '2,41 s', change: 3.2, positive: true },
-      { label: 'Lanzamiento', value: '78 km/h', change: 4.5, positive: true },
-    ],
-  };
-}
 
 export async function getAthletePortalData(
   athleteId: string,
@@ -473,4 +358,3 @@ function formatNumber(value: number) {
     value,
   );
 }
-import { getD1 } from '@/db';

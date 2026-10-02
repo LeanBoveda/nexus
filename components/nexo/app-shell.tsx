@@ -1,14 +1,10 @@
 /* eslint-disable next/no-html-link-for-pages -- Vinext's current Link runtime breaks production navigation; native links keep every section reliable. */
 import {
-  Activity,
-  Bell,
-  CalendarDays,
   ChevronDown,
   ClipboardCheck,
   Dumbbell,
   LayoutDashboard,
   Plus,
-  Search,
   Sparkles,
   Users,
   UsersRound,
@@ -27,16 +23,13 @@ export type NexoSection =
   | 'deportistas'
   | 'grupos'
   | 'rutinas'
-  | 'evaluaciones'
-  | 'agenda'
-  | 'carga';
+  | 'evaluaciones';
 
 const navigation: Array<{
   id: NexoSection;
   label: string;
   href: string;
   icon: typeof LayoutDashboard;
-  soon?: boolean;
 }> = [
   { id: 'inicio', label: 'Inicio', href: '/', icon: LayoutDashboard },
   {
@@ -52,20 +45,6 @@ const navigation: Array<{
     label: 'Evaluaciones',
     href: '/evaluaciones',
     icon: ClipboardCheck,
-  },
-  {
-    id: 'agenda',
-    label: 'Agenda',
-    href: '/agenda',
-    icon: CalendarDays,
-    soon: true,
-  },
-  {
-    id: 'carga',
-    label: 'Carga y bienestar',
-    href: '/carga',
-    icon: Activity,
-    soon: true,
   },
 ];
 
@@ -86,6 +65,11 @@ export async function AppShell({
     .toUpperCase();
   return (
     <main className="min-h-screen bg-background text-foreground">
+      {navigation
+        .filter((item) => item.id !== active)
+        .map((item) => (
+          <link key={item.href} rel="prefetch" href={item.href} />
+        ))}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[244px] border-r border-sidebar-border bg-sidebar px-4 py-5 lg:flex lg:flex-col">
         <a href="/" className="flex items-center gap-3 px-2">
           <LogoMark />
@@ -131,11 +115,6 @@ export async function AppShell({
             >
               <item.icon className="size-4" strokeWidth={1.9} />
               <span>{item.label}</span>
-              {item.soon && (
-                <span className="ml-auto rounded-full bg-[#e6ebde] px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[#677154]">
-                  Pronto
-                </span>
-              )}
             </a>
           ))}
         </nav>
@@ -185,25 +164,7 @@ export async function AppShell({
             <LogoMark compact />
             <span className="text-sm font-bold tracking-tight">NEXO</span>
           </a>
-          <label className="ml-auto hidden h-9 w-[min(360px,36vw)] items-center gap-2 rounded-xl border border-border bg-card px-3 text-muted-foreground shadow-sm md:flex lg:ml-0">
-            <Search className="size-4" />
-            <input
-              aria-label="Buscar deportistas, grupos o rutinas"
-              placeholder="Buscar deportistas, grupos o rutinas..."
-              className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
-            />
-            <kbd className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px]">
-              ⌘ K
-            </kbd>
-          </label>
           <div className="ml-auto flex items-center gap-2">
-            <button
-              aria-label="Notificaciones"
-              className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-foreground transition hover:bg-muted"
-            >
-              <Bell className="size-4" />
-              <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#ef664d] ring-2 ring-card" />
-            </button>
             <a
               href="/rutinas/nueva"
               className={cn(
@@ -222,7 +183,7 @@ export async function AppShell({
         aria-label="Navegación móvil"
         className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden"
       >
-        {navigation.slice(0, 5).map((item) => (
+        {navigation.map((item) => (
           <a
             key={item.id}
             href={item.href}

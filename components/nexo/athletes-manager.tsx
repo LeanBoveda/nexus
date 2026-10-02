@@ -276,12 +276,6 @@ export function AthletesManager() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a
-            href="/mi-entrenamiento"
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border bg-card px-3.5 text-sm font-semibold transition hover:bg-muted"
-          >
-            <Eye className="size-4" /> Vista deportista
-          </a>
           <Button
             onClick={openCreate}
             className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
@@ -436,9 +430,12 @@ export function AthletesManager() {
                               </AvatarFallback>
                             </Avatar>
                             <div>
-                              <p className="text-sm font-semibold">
+                              <a
+                                href={`/deportistas/${encodeURIComponent(athlete.id)}`}
+                                className="text-sm font-semibold hover:text-[#52751d] hover:underline"
+                              >
                                 {athlete.firstName} {athlete.lastName}
-                              </p>
+                              </a>
                               <p className="text-xs text-muted-foreground">
                                 {athlete.primaryPosition ??
                                   'Sin posición definida'}
@@ -510,6 +507,13 @@ export function AthletesManager() {
                               <MoreHorizontal />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  window.location.href = `/deportistas/${encodeURIComponent(athlete.id)}`;
+                                }}
+                              >
+                                <Eye /> Ver perfil
+                              </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => openAccess(athlete)}
                               >
