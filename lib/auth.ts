@@ -8,6 +8,7 @@ const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 7;
 const ATHLETE_ACCESS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const PLATFORM_ADMIN_EMAIL = 'leandroboveda@gmail.com';
 
 export type NexoUser = {
   id: string;
@@ -15,6 +16,9 @@ export type NexoUser = {
   name: string;
   role: 'owner' | 'coach' | 'athlete';
   athleteId: string | null;
+  trainerAccountId: string | null;
+  isPlatformAdmin: boolean;
+  accountAccessStatus: 'active' | 'paused' | 'blocked' | null;
 };
 
 export async function getAuthStatus() {
@@ -41,12 +45,25 @@ export async function getStaffSessionFromRequest(
   request: Request,
 ): Promise<NexoUser | null> {
   const user = await getSessionFromRequest(request);
-  return user && user.role !== 'athlete' ? user : null;
+  return user && user.role !== 'athlete' && user.trainerAccountId ? user : null;
+}
+
+export async function getPlatformAdminSessionFromRequest(
+  request: Request,
+): Promise<NexoUser | null> {
+  const user = await getSessionFromRequest(request);
+  return user?.isPlatformAdmin ? user : null;
 }
 
 export async function requireSession() {
   const user = await getSession();
   if (!user) redirect('/login');
+  return user;
+}
+
+export async function requirePlatformAdmin() {
+  const user = await requireSession();
+  if (!user.isPlatformAdmin) redirect('/');
   return user;
 }
 
@@ -74,17 +91,36 @@ export async function createOwner(input: {
   validateCredentials(input.name, email, input.password);
   const { salt, hash } = await hashPassword(input.password);
   const id = crypto.randomUUID();
+  const accountId = crypto.randomUUID();
   const token = randomToken(32);
   const now = Date.now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO users
-      (id, email, name, role, password_salt, password_hash, status, created_at)
-      VALUES (?, ?, ?, 'owner', ?, ?, 'active', ?)`).bind(
+    env.DB.prepare(`INSERT INTO trainer_accounts
+      (id, business_name, slug, owner_user_id, contact_email, country_code,
+       access_status, subscription_status, plan, monthly_price_cents, currency,
+       max_athletes, trial_ends_at, current_period_ends_at, notes, updated_at, created_at)
+      VALUES (?, ?, ?, ?, ?, 'AR', 'active', 'trialing', 'starter', 0, 'ARS',
+       30, ?, NULL, NULL, ?, ?)`).bind(
+      accountId,
+      input.name.trim(),
+      `cuenta-${accountId.slice(0, 8)}`,
       id,
+      email,
+      now + 14 * 24 * 60 * 60 * 1000,
+      now,
+      now,
+    ),
+    env.DB.prepare(`INSERT INTO users
+      (id, trainer_account_id, email, name, role, password_salt, password_hash,
+       status, is_platform_admin, created_at)
+      VALUES (?, ?, ?, ?, 'owner', ?, ?, 'active', ?, ?)`).bind(
+      id,
+      accountId,
       email,
       input.name.trim(),
       salt,
       hash,
+      email === PLATFORM_ADMIN_EMAIL ? 1 : 0,
       now,
     ),
     env.DB.prepare(`INSERT INTO auth_sessions
@@ -105,18 +141,24 @@ export async function authenticate(input: {
   password: string;
   ip: string;
 }) {
+  await initializeLegacyAccount();
   const email = normalizeEmail(input.email);
   const rateKey = await sha256(`${input.ip}|${email}`);
   await assertLoginAllowed(rateKey);
 
   const user =
-    await env.DB.prepare(`SELECT id, password_salt AS passwordSalt, password_hash AS passwordHash
-    FROM users WHERE email = ? AND status = 'active' LIMIT 1`)
+    await env.DB.prepare(`SELECT u.id, u.password_salt AS passwordSalt,
+    u.password_hash AS passwordHash, u.trainer_account_id AS trainerAccountId,
+    ta.access_status AS accountAccessStatus
+    FROM users u LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
+    WHERE u.email = ? AND u.status = 'active' LIMIT 1`)
       .bind(email)
       .first<{
         id: string;
         passwordSalt: string | null;
         passwordHash: string | null;
+        trainerAccountId: string | null;
+        accountAccessStatus: string | null;
       }>();
 
   const valid = Boolean(
@@ -132,6 +174,12 @@ export async function authenticate(input: {
     await recordFailedLogin(rateKey);
     throw new AuthError('Email o contraseña incorrectos.', 401);
   }
+  if (user.trainerAccountId && user.accountAccessStatus !== 'active') {
+    throw new AuthError(
+      'Tu cuenta está pausada. Contactá al administrador de Nexo.',
+      403,
+    );
+  }
 
   await env.DB.prepare('DELETE FROM login_attempts WHERE key = ?')
     .bind(rateKey)
@@ -142,11 +190,14 @@ export async function authenticate(input: {
 export async function createAthleteAccessToken(
   athleteId: string,
   createdBy: string,
+  trainerAccountId: string | null,
 ) {
+  if (!trainerAccountId) throw new AuthError('No autorizado.', 401);
   await ensureAthleteAccessTable();
   const athlete = await env.DB.prepare(`SELECT id FROM athletes
-    WHERE id = ? AND status = 'active' LIMIT 1`)
-    .bind(athleteId)
+    WHERE id = ? AND status = 'active'
+      AND trainer_account_id = ? LIMIT 1`)
+    .bind(athleteId, trainerAccountId)
     .first<{ id: string }>();
   if (!athlete) throw new AuthError('El deportista no está disponible.', 404);
 
@@ -175,11 +226,14 @@ export async function redeemAthleteAccessToken(token: string) {
     throw new AuthError('El enlace no es válido.', 401);
   const now = Date.now();
   const link = await env.DB.prepare(`SELECT l.id, a.id AS athleteId, a.email,
-    a.first_name AS firstName, a.last_name AS lastName
+    a.first_name AS firstName, a.last_name AS lastName,
+    a.trainer_account_id AS trainerAccountId
     FROM athlete_access_links l
     JOIN athletes a ON a.id = l.athlete_id
+    LEFT JOIN trainer_accounts ta ON ta.id = a.trainer_account_id
     WHERE l.token_hash = ? AND l.redeemed_at IS NULL AND l.expires_at > ?
-      AND a.status = 'active' LIMIT 1`)
+      AND a.status = 'active'
+      AND (ta.id IS NULL OR ta.access_status = 'active') LIMIT 1`)
     .bind(await sha256(token), now)
     .first<{
       id: string;
@@ -187,9 +241,15 @@ export async function redeemAthleteAccessToken(token: string) {
       email: string;
       firstName: string;
       lastName: string;
+      trainerAccountId: string | null;
     }>();
   if (!link) throw new AuthError('El enlace venció o ya fue utilizado.', 401);
 
+  const account = await env.DB.prepare(
+    'SELECT trainer_account_id AS trainerAccountId FROM athletes WHERE id = ?',
+  )
+    .bind(link.athleteId)
+    .first<{ trainerAccountId: string | null }>();
   const byAthlete =
     await env.DB.prepare(`SELECT id, role, athlete_id AS athleteId
     FROM users WHERE athlete_id = ? LIMIT 1`)
@@ -217,15 +277,21 @@ export async function redeemAthleteAccessToken(token: string) {
   const statements: D1PreparedStatement[] = [];
   if (existing) {
     statements.push(
-      env.DB.prepare(`UPDATE users SET athlete_id = ?, status = 'active'
-        WHERE id = ? AND role = 'athlete'`).bind(link.athleteId, userId),
+      env.DB.prepare(`UPDATE users SET athlete_id = ?, trainer_account_id = ?, status = 'active'
+        WHERE id = ? AND role = 'athlete'`).bind(
+        link.athleteId,
+        account?.trainerAccountId ?? null,
+        userId,
+      ),
     );
   } else {
     statements.push(
       env.DB.prepare(`INSERT INTO users
-        (id, email, name, role, password_salt, password_hash, athlete_id, status, created_at)
-        VALUES (?, ?, ?, 'athlete', NULL, NULL, ?, 'active', ?)`).bind(
+        (id, trainer_account_id, email, name, role, password_salt, password_hash,
+         athlete_id, status, is_platform_admin, created_at)
+        VALUES (?, ?, ?, ?, 'athlete', NULL, NULL, ?, 'active', 0, ?)`).bind(
         userId,
+        account?.trainerAccountId ?? null,
         link.email.trim().toLowerCase(),
         `${link.firstName} ${link.lastName}`.trim(),
         link.athleteId,
@@ -291,16 +357,24 @@ async function createSession(userId: string) {
 
 async function getSessionByToken(token?: string): Promise<NexoUser | null> {
   if (!token) return null;
+  await initializeLegacyAccount();
   const now = Date.now();
   const tokenHash = await sha256(token);
   const result = await env.DB.prepare(`SELECT u.id, u.email, u.name, u.role,
-    u.athlete_id AS athleteId,
+    u.athlete_id AS athleteId, u.trainer_account_id AS trainerAccountId,
+    u.is_platform_admin AS isPlatformAdmin,
+    ta.access_status AS accountAccessStatus,
     s.expires_at AS expiresAt, s.last_seen_at AS lastSeenAt
     FROM auth_sessions s JOIN users u ON u.id = s.user_id
+    LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
     WHERE s.token_hash = ? AND u.status = 'active' LIMIT 1`)
     .bind(tokenHash)
     .first<NexoUser & { expiresAt: number; lastSeenAt: number }>();
-  if (!result || result.expiresAt <= now) {
+  if (
+    !result ||
+    result.expiresAt <= now ||
+    (result.trainerAccountId && result.accountAccessStatus !== 'active')
+  ) {
     await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash = ?')
       .bind(tokenHash)
       .run();
@@ -319,7 +393,119 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
     name: result.name,
     role: result.role,
     athleteId: result.athleteId,
+    trainerAccountId: result.trainerAccountId,
+    isPlatformAdmin:
+      result.role !== 'athlete' &&
+      normalizeEmail(result.email) === PLATFORM_ADMIN_EMAIL,
+    accountAccessStatus: result.accountAccessStatus,
   };
+}
+
+// Bounded, idempotent data migration. Schema migrations remain schema-only.
+// New PF accounts are always created with an account ID and never enter this path.
+async function initializeLegacyAccount() {
+  const owner =
+    await env.DB.prepare(`SELECT id, name, email, created_at AS createdAt
+    FROM users WHERE role = 'owner' AND trainer_account_id IS NULL
+    ORDER BY created_at, id LIMIT 1`).first<{
+      id: string;
+      name: string;
+      email: string;
+      createdAt: number;
+    }>();
+  if (!owner) return;
+  const accountId = 'legacy-main-account';
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO trainer_accounts
+      (id, business_name, slug, owner_user_id, contact_email, access_status,
+       subscription_status, plan, max_athletes, created_at, updated_at)
+      VALUES (?, ?, 'cuenta-principal', ?, ?, 'active', 'active', 'team', 500, ?, ?)`).bind(
+      accountId,
+      owner.name,
+      owner.id,
+      owner.email,
+      owner.createdAt,
+      now,
+    ),
+    ...[
+      'organizations',
+      'athletes',
+      'routines',
+      'evaluation_templates',
+      'files',
+      'users',
+    ].map((table) =>
+      env.DB.prepare(
+        `UPDATE ${table} SET trainer_account_id = ? WHERE trainer_account_id IS NULL`,
+      ).bind(accountId),
+    ),
+  ]);
+}
+
+export async function createManagedTrainerAccount(input: {
+  businessName: string;
+  ownerName: string;
+  email: string;
+  password: string;
+  plan: 'starter' | 'pro' | 'team';
+  subscriptionStatus: 'trialing' | 'active' | 'past_due' | 'canceled';
+  monthlyPriceCents: number;
+  currency: 'ARS' | 'USD';
+  maxAthletes: number;
+  periodEndsAt: number | null;
+}) {
+  const email = normalizeEmail(input.email);
+  validateCredentials(input.ownerName, email, input.password);
+  const duplicate = await env.DB.prepare(
+    'SELECT id FROM users WHERE lower(email) = lower(?) LIMIT 1',
+  )
+    .bind(email)
+    .first();
+  if (duplicate)
+    throw new AuthError('Ya existe una cuenta con ese email.', 409);
+
+  const { salt, hash } = await hashPassword(input.password);
+  const accountId = crypto.randomUUID();
+  const userId = crypto.randomUUID();
+  const now = Date.now();
+  const slugBase = slugify(input.businessName) || `pf-${accountId.slice(0, 8)}`;
+  const slug = `${slugBase}-${accountId.slice(0, 6)}`;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO trainer_accounts
+      (id, business_name, slug, owner_user_id, contact_email, country_code,
+       access_status, subscription_status, plan, monthly_price_cents, currency,
+       max_athletes, trial_ends_at, current_period_ends_at, notes, updated_at, created_at)
+      VALUES (?, ?, ?, ?, ?, 'AR', 'active', ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`).bind(
+      accountId,
+      input.businessName.trim(),
+      slug,
+      userId,
+      email,
+      input.subscriptionStatus,
+      input.plan,
+      input.monthlyPriceCents,
+      input.currency,
+      input.maxAthletes,
+      input.subscriptionStatus === 'trialing' ? input.periodEndsAt : null,
+      input.periodEndsAt,
+      now,
+      now,
+    ),
+    env.DB.prepare(`INSERT INTO users
+      (id, trainer_account_id, email, name, role, password_salt, password_hash,
+       athlete_id, status, is_platform_admin, created_at)
+      VALUES (?, ?, ?, ?, 'owner', ?, ?, NULL, 'active', 0, ?)`).bind(
+      userId,
+      accountId,
+      email,
+      input.ownerName.trim(),
+      salt,
+      hash,
+      now,
+    ),
+  ]);
+  return { accountId, userId, slug };
 }
 
 async function assertLoginAllowed(key: string) {
@@ -368,6 +554,16 @@ function validateCredentials(name: string, email: string, password: string) {
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+function slugify(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48);
 }
 
 async function hashPassword(password: string) {

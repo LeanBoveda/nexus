@@ -18,21 +18,52 @@ type EvaluationAction = {
 };
 
 const defaultMetrics = [
-  { key: 'cmj', label: 'CMJ', unit: 'cm', direction: 'higher', protocol: 'Salto con contramovimiento' },
-  { key: 'sprint_15m', label: 'Sprint 15 m', unit: 's', direction: 'lower', protocol: 'Salida detenida' },
-  { key: 'lanzamiento', label: 'Lanzamiento', unit: 'km/h', direction: 'higher', protocol: 'Mejor intento' },
-  { key: 'agarre_derecho', label: 'Agarre derecho', unit: 'kg', direction: 'higher', protocol: 'Dinamometría' },
-  { key: 'agarre_izquierdo', label: 'Agarre izquierdo', unit: 'kg', direction: 'higher', protocol: 'Dinamometría' },
+  {
+    key: 'cmj',
+    label: 'CMJ',
+    unit: 'cm',
+    direction: 'higher',
+    protocol: 'Salto con contramovimiento',
+  },
+  {
+    key: 'sprint_15m',
+    label: 'Sprint 15 m',
+    unit: 's',
+    direction: 'lower',
+    protocol: 'Salida detenida',
+  },
+  {
+    key: 'lanzamiento',
+    label: 'Lanzamiento',
+    unit: 'km/h',
+    direction: 'higher',
+    protocol: 'Mejor intento',
+  },
+  {
+    key: 'agarre_derecho',
+    label: 'Agarre derecho',
+    unit: 'kg',
+    direction: 'higher',
+    protocol: 'Dinamometría',
+  },
+  {
+    key: 'agarre_izquierdo',
+    label: 'Agarre izquierdo',
+    unit: 'kg',
+    direction: 'higher',
+    protocol: 'Dinamometría',
+  },
 ] as const;
 
 export async function GET(request: Request) {
   const user = await getStaffSessionFromRequest(request);
-  if (!user) return Response.json({ error: 'No autorizado.' }, { status: 401 });
+  if (!user?.trainerAccountId)
+    return Response.json({ error: 'No autorizado.' }, { status: 401 });
 
   const db = getD1();
   const athleteId = new URL(request.url).searchParams.get('athleteId');
   try {
-    const templateId = await ensureTemplate(db, user.id);
+    const templateId = await ensureTemplate(db, user.id, user.trainerAccountId);
     const [metrics, athletes, groups, resultRows] = await Promise.all([
       db
         .prepare(
@@ -46,13 +77,18 @@ export async function GET(request: Request) {
         .prepare(
           `SELECT id, first_name AS firstName, last_name AS lastName, email,
           primary_position AS primaryPosition
-          FROM athletes WHERE status = 'active' ORDER BY last_name, first_name`,
+          FROM athletes WHERE status = 'active' AND trainer_account_id = ?
+          ORDER BY last_name, first_name`,
         )
+        .bind(user.trainerAccountId)
         .all(),
       db
         .prepare(
-          `SELECT id, name FROM groups WHERE active = 1 ORDER BY name`,
+          `SELECT g.id, g.name FROM groups g
+          JOIN organizations o ON o.id = g.organization_id
+          WHERE g.active = 1 AND o.trainer_account_id = ? ORDER BY g.name`,
         )
+        .bind(user.trainerAccountId)
         .all(),
       athleteId
         ? db
@@ -69,7 +105,8 @@ export async function GET(request: Request) {
               JOIN evaluation_results er ON er.session_id = es.id
               JOIN evaluation_metrics em ON em.id = er.metric_id
               WHERE es.template_id = ? AND es.athlete_id = ?
-              ORDER BY es.evaluated_at DESC, em.sort_order, em.label`)
+              ORDER BY es.evaluated_at DESC, em.sort_order, em.label`,
+            )
             .bind(templateId, athleteId)
             .all()
         : db
@@ -86,7 +123,8 @@ export async function GET(request: Request) {
               JOIN evaluation_results er ON er.session_id = es.id
               JOIN evaluation_metrics em ON em.id = er.metric_id
               WHERE es.template_id = ?
-              ORDER BY es.evaluated_at DESC, em.sort_order, em.label LIMIT 1500`)
+              ORDER BY es.evaluated_at DESC, em.sort_order, em.label LIMIT 1500`,
+            )
             .bind(templateId)
             .all(),
     ]);
@@ -109,7 +147,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getStaffSessionFromRequest(request);
-  if (!user) return Response.json({ error: 'No autorizado.' }, { status: 401 });
+  if (!user?.trainerAccountId)
+    return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request)) {
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
   }
@@ -118,19 +157,25 @@ export async function POST(request: Request) {
   const db = getD1();
 
   try {
-    const templateId = await ensureTemplate(db, user.id);
+    const templateId = await ensureTemplate(db, user.id, user.trainerAccountId);
     if (input.action === 'createMetric') {
       const label = input.label?.trim();
       const unit = input.unit?.trim();
       const direction = input.betterDirection;
-      if (!label || !unit || !['higher', 'lower', 'neutral'].includes(direction ?? '')) {
+      if (
+        !label ||
+        !unit ||
+        !['higher', 'lower', 'neutral'].includes(direction ?? '')
+      ) {
         return Response.json(
           { error: 'Completá el nombre, la unidad y el sentido de mejora.' },
           { status: 400 },
         );
       }
       const count = await db
-        .prepare('SELECT COUNT(*) AS count FROM evaluation_metrics WHERE template_id = ?')
+        .prepare(
+          'SELECT COUNT(*) AS count FROM evaluation_metrics WHERE template_id = ?',
+        )
         .bind(templateId)
         .first<{ count: number }>();
       const metricId = crypto.randomUUID();
@@ -167,21 +212,34 @@ export async function POST(request: Request) {
         );
       }
       const athlete = await db
-        .prepare("SELECT id FROM athletes WHERE id = ? AND status = 'active'")
-        .bind(input.athleteId)
+        .prepare(
+          "SELECT id FROM athletes WHERE id = ? AND trainer_account_id = ? AND status = 'active'",
+        )
+        .bind(input.athleteId, user.trainerAccountId)
         .first();
       if (!athlete) {
-        return Response.json({ error: 'El deportista no está disponible.' }, { status: 404 });
+        return Response.json(
+          { error: 'El deportista no está disponible.' },
+          { status: 404 },
+        );
       }
 
       const allowedMetrics = await db
         .prepare('SELECT id FROM evaluation_metrics WHERE template_id = ?')
         .bind(templateId)
         .all<{ id: string }>();
-      const allowed = new Set(allowedMetrics.results.map((metric) => metric.id));
+      const allowed = new Set(
+        allowedMetrics.results.map((metric) => metric.id),
+      );
       const results = (input.results ?? [])
-        .map((result) => ({ metricId: result.metricId ?? '', value: Number(result.value) }))
-        .filter((result) => allowed.has(result.metricId) && Number.isFinite(result.value));
+        .map((result) => ({
+          metricId: result.metricId ?? '',
+          value: Number(result.value),
+        }))
+        .filter(
+          (result) =>
+            allowed.has(result.metricId) && Number.isFinite(result.value),
+        );
       if (results.length === 0) {
         return Response.json(
           { error: 'Ingresá al menos un resultado numérico.' },
@@ -191,8 +249,9 @@ export async function POST(request: Request) {
 
       const groupId = input.groupId
         ? await db
-            .prepare('SELECT id FROM groups WHERE id = ? AND active = 1')
-            .bind(input.groupId)
+            .prepare(`SELECT g.id FROM groups g JOIN organizations o ON o.id = g.organization_id
+              WHERE g.id = ? AND g.active = 1 AND o.trainer_account_id = ?`)
+            .bind(input.groupId, user.trainerAccountId)
             .first<{ id: string }>()
         : null;
       const sessionId = crypto.randomUUID();
@@ -240,9 +299,16 @@ export async function POST(request: Request) {
   }
 }
 
-async function ensureTemplate(db: D1Database, userId: string) {
+async function ensureTemplate(
+  db: D1Database,
+  userId: string,
+  trainerAccountId: string,
+) {
   const existing = await db
-    .prepare("SELECT id FROM evaluation_templates WHERE name = 'Rendimiento handball' ORDER BY created_at LIMIT 1")
+    .prepare(
+      "SELECT id FROM evaluation_templates WHERE name = 'Rendimiento handball' AND trainer_account_id = ? ORDER BY created_at LIMIT 1",
+    )
+    .bind(trainerAccountId)
     .first<{ id: string }>();
   if (existing) return existing.id;
 
@@ -251,11 +317,11 @@ async function ensureTemplate(db: D1Database, userId: string) {
     db
       .prepare(
         `INSERT INTO evaluation_templates
-        (id, name, sport, description, created_by, created_at)
-        VALUES (?, 'Rendimiento handball', 'general',
+        (id, trainer_account_id, name, sport, description, created_by, created_at)
+        VALUES (?, ?, 'Rendimiento handball', 'general',
           'Batería editable de evaluaciones de rendimiento', ?, ?)`,
       )
-      .bind(templateId, userId, Date.now()),
+      .bind(templateId, trainerAccountId, userId, Date.now()),
     ...defaultMetrics.map((metric, index) =>
       db
         .prepare(
@@ -287,11 +353,13 @@ function parseLocalDate(value: string) {
 }
 
 function slug(value: string) {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '')
-    .slice(0, 48) || 'test';
+  return (
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '')
+      .slice(0, 48) || 'test'
+  );
 }

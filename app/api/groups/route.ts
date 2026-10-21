@@ -16,7 +16,8 @@ type GroupAction = {
 };
 
 export async function GET(request: Request) {
-  if (!(await getStaffSessionFromRequest(request)))
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const db = getD1();
   const [groupResult, athleteResult, membershipResult] = await Promise.all([
@@ -27,14 +28,17 @@ export async function GET(request: Request) {
       FROM groups g
       JOIN organizations o ON o.id = g.organization_id
       LEFT JOIN group_memberships gm ON gm.group_id = g.id
-      WHERE g.active = 1
+      WHERE g.active = 1 AND o.trainer_account_id = ?
       GROUP BY g.id, g.name, g.sport, g.season, g.active, o.id, o.name, o.type
       ORDER BY o.name, g.name`)
+      .bind(user.trainerAccountId)
       .all(),
     db
       .prepare(`SELECT id, first_name AS firstName, last_name AS lastName, email,
       primary_position AS primaryPosition, status
-      FROM athletes WHERE status = 'active' ORDER BY last_name, first_name`)
+      FROM athletes WHERE status = 'active' AND trainer_account_id = ?
+      ORDER BY last_name, first_name`)
+      .bind(user.trainerAccountId)
       .all(),
     db
       .prepare(`SELECT gm.group_id AS groupId, gm.athlete_id AS athleteId, gm.role,
@@ -42,8 +46,12 @@ export async function GET(request: Request) {
       a.primary_position AS primaryPosition
       FROM group_memberships gm
       JOIN athletes a ON a.id = gm.athlete_id
+      JOIN groups g ON g.id = gm.group_id
+      JOIN organizations o ON o.id = g.organization_id
       WHERE gm.ended_at IS NULL AND a.status = 'active'
+        AND a.trainer_account_id = ? AND o.trainer_account_id = ?
       ORDER BY a.last_name, a.first_name`)
+      .bind(user.trainerAccountId, user.trainerAccountId)
       .all(),
   ]);
 
@@ -56,7 +64,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getStaffSessionFromRequest(request);
-  if (!user) return Response.json({ error: 'No autorizado.' }, { status: 401 });
+  if (!user?.trainerAccountId)
+    return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
   const input = (await request.json()) as GroupAction;
@@ -82,9 +91,9 @@ export async function POST(request: Request) {
 
       let organization = await db
         .prepare(
-          'SELECT id FROM organizations WHERE lower(name) = lower(?) LIMIT 1',
+          'SELECT id FROM organizations WHERE lower(name) = lower(?) AND trainer_account_id = ? LIMIT 1',
         )
-        .bind(organizationName)
+        .bind(organizationName, user.trainerAccountId)
         .first<{ id: string }>();
       const statements: D1PreparedStatement[] = [];
       if (!organization) {
@@ -92,9 +101,11 @@ export async function POST(request: Request) {
         statements.push(
           db
             .prepare(`INSERT INTO organizations
-          (id, name, type, country_code, created_at) VALUES (?, ?, ?, 'AR', ?)`)
+          (id, trainer_account_id, name, type, country_code, created_at)
+          VALUES (?, ?, ?, ?, 'AR', ?)`)
             .bind(
               organization.id,
+              user.trainerAccountId,
               organizationName,
               input.organizationType,
               Date.now(),
@@ -141,6 +152,21 @@ export async function POST(request: Request) {
         return Response.json(
           { error: 'Seleccioná al menos una persona.' },
           { status: 400 },
+        );
+      const allowedGroup = await db
+        .prepare(`SELECT g.id FROM groups g JOIN organizations o ON o.id = g.organization_id
+          WHERE g.id = ? AND g.active = 1 AND o.trainer_account_id = ?`)
+        .bind(input.groupId, user.trainerAccountId)
+        .first();
+      const allowedAthletes = await db
+        .prepare(`SELECT id FROM athletes WHERE trainer_account_id = ?
+          AND status = 'active' AND id IN (${athleteIds.map(() => '?').join(',')})`)
+        .bind(user.trainerAccountId, ...athleteIds)
+        .all<{ id: string }>();
+      if (!allowedGroup || allowedAthletes.results.length !== athleteIds.length)
+        return Response.json(
+          { error: 'El grupo o algún deportista no está disponible.' },
+          { status: 404 },
         );
       const assignments = await db
         .prepare(
@@ -193,6 +219,25 @@ export async function POST(request: Request) {
           { error: 'Faltan datos para quitar la persona.' },
           { status: 400 },
         );
+      const membership = await db
+        .prepare(`SELECT gm.athlete_id FROM group_memberships gm
+          JOIN athletes a ON a.id = gm.athlete_id
+          JOIN groups g ON g.id = gm.group_id
+          JOIN organizations o ON o.id = g.organization_id
+          WHERE gm.group_id = ? AND gm.athlete_id = ?
+            AND a.trainer_account_id = ? AND o.trainer_account_id = ?`)
+        .bind(
+          input.groupId,
+          input.athleteId,
+          user.trainerAccountId,
+          user.trainerAccountId,
+        )
+        .first();
+      if (!membership)
+        return Response.json(
+          { error: 'La persona no pertenece a esa cuenta.' },
+          { status: 404 },
+        );
       await db.batch([
         db
           .prepare(`UPDATE group_memberships SET ended_at = ?
@@ -215,6 +260,13 @@ export async function POST(request: Request) {
     if (input.action === 'archive') {
       if (!input.groupId)
         return Response.json({ error: 'Grupo inválido.' }, { status: 400 });
+      const ownedGroup = await db
+        .prepare(`SELECT g.id FROM groups g JOIN organizations o ON o.id = g.organization_id
+          WHERE g.id = ? AND o.trainer_account_id = ?`)
+        .bind(input.groupId, user.trainerAccountId)
+        .first();
+      if (!ownedGroup)
+        return Response.json({ error: 'Grupo inválido.' }, { status: 404 });
       await db.batch([
         db
           .prepare('UPDATE groups SET active = 0 WHERE id = ?')

@@ -11,6 +11,7 @@ type RoutineContent = {
   activeWeek?: unknown;
   weekPlans?: unknown;
   rows?: unknown;
+  sessions?: unknown;
 };
 
 type RoutineAction = {
@@ -26,7 +27,8 @@ type RoutineAction = {
 };
 
 export async function GET(request: Request) {
-  if (!(await getStaffSessionFromRequest(request))) {
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId) {
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   }
 
@@ -45,12 +47,16 @@ export async function GET(request: Request) {
             WHERE latest.routine_id = r.id
             ORDER BY latest.version_number DESC LIMIT 1
           )
-          WHERE r.id = ? AND r.status != 'archived' LIMIT 1`,
+          WHERE r.id = ? AND r.trainer_account_id = ?
+            AND r.status != 'archived' LIMIT 1`,
         )
-        .bind(routineId)
+        .bind(routineId, user.trainerAccountId)
         .first();
       if (!routine) {
-        return Response.json({ error: 'La rutina no existe.' }, { status: 404 });
+        return Response.json(
+          { error: 'La rutina no existe.' },
+          { status: 404 },
+        );
       }
       return Response.json({ routine: normalizeRoutine(routine) });
     }
@@ -76,9 +82,10 @@ export async function GET(request: Request) {
           WHERE latest.routine_id = r.id
           ORDER BY latest.version_number DESC LIMIT 1
         )
-        WHERE r.status != 'archived'
+        WHERE r.status != 'archived' AND r.trainer_account_id = ?
         ORDER BY r.created_at DESC`,
       )
+      .bind(user.trainerAccountId)
       .all();
 
     const assignments = await db
@@ -92,10 +99,11 @@ export async function GET(request: Request) {
         JOIN routines r ON r.id = rv.routine_id
         LEFT JOIN groups g ON ra.target_type = 'group' AND g.id = ra.target_id
         LEFT JOIN athletes a ON ra.target_type = 'athlete' AND a.id = ra.target_id
-        WHERE r.status != 'archived'
+        WHERE r.status != 'archived' AND r.trainer_account_id = ?
           AND (ra.ends_on IS NULL OR ra.ends_on >= date('now'))
         ORDER BY ra.created_at DESC`,
       )
+      .bind(user.trainerAccountId)
       .all<{
         routineId: string;
         targetType: 'group' | 'athlete';
@@ -129,7 +137,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const user = await getStaffSessionFromRequest(request);
-  if (!user) return Response.json({ error: 'No autorizado.' }, { status: 401 });
+  if (!user?.trainerAccountId)
+    return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request)) {
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
   }
@@ -143,7 +152,10 @@ export async function POST(request: Request) {
       const content = validateContent(input.content);
       if (!name || !content) {
         return Response.json(
-          { error: 'Completá el nombre, las semanas y al menos un ejercicio.' },
+          {
+            error:
+              'Completá el nombre, las semanas y los ejercicios de cada día.',
+          },
           { status: 400 },
         );
       }
@@ -157,32 +169,42 @@ export async function POST(request: Request) {
           .prepare(
             `SELECT r.id, COALESCE(MAX(rv.version_number), 0) AS versionNumber
             FROM routines r LEFT JOIN routine_versions rv ON rv.routine_id = r.id
-            WHERE r.id = ? AND r.status != 'archived' GROUP BY r.id`,
+            WHERE r.id = ? AND r.trainer_account_id = ?
+              AND r.status != 'archived' GROUP BY r.id`,
           )
-          .bind(input.routineId)
+          .bind(input.routineId, user.trainerAccountId)
           .first<{ id: string; versionNumber: number }>();
         if (!existing) {
-          return Response.json({ error: 'La rutina no existe.' }, { status: 404 });
+          return Response.json(
+            { error: 'La rutina no existe.' },
+            { status: 404 },
+          );
         }
         nextVersion = Number(existing.versionNumber) + 1;
         statements.push(
           db
             .prepare(
               `UPDATE routines SET name = ?, description = ?, status = 'published'
-              WHERE id = ?`,
+              WHERE id = ? AND trainer_account_id = ?`,
             )
-            .bind(name, input.description?.trim() || null, routineId),
+            .bind(
+              name,
+              input.description?.trim() || null,
+              routineId,
+              user.trainerAccountId,
+            ),
         );
       } else {
         statements.push(
           db
             .prepare(
               `INSERT INTO routines
-              (id, organization_id, name, description, status, created_by, created_at)
-              VALUES (?, NULL, ?, ?, 'published', ?, ?)`,
+              (id, trainer_account_id, organization_id, name, description, status, created_by, created_at)
+              VALUES (?, ?, NULL, ?, ?, 'published', ?, ?)`,
             )
             .bind(
               routineId,
+              user.trainerAccountId,
               name,
               input.description?.trim() || null,
               user.id,
@@ -253,19 +275,23 @@ export async function POST(request: Request) {
       const version = await db
         .prepare(
           `SELECT rv.id FROM routine_versions rv JOIN routines r ON r.id = rv.routine_id
-          WHERE r.id = ? AND r.status != 'archived'
+          WHERE r.id = ? AND r.trainer_account_id = ? AND r.status != 'archived'
           ORDER BY rv.version_number DESC LIMIT 1`,
         )
-        .bind(input.routineId)
+        .bind(input.routineId, user.trainerAccountId)
         .first<{ id: string }>();
       if (!version) {
-        return Response.json({ error: 'Primero guardá la rutina.' }, { status: 404 });
+        return Response.json(
+          { error: 'Primero guardá la rutina.' },
+          { status: 404 },
+        );
       }
 
       const athleteIds = await resolveAthletes(
         db,
         input.targetType!,
         input.targetId,
+        user.trainerAccountId,
       );
       if (athleteIds.length === 0) {
         return Response.json(
@@ -309,17 +335,31 @@ export async function POST(request: Request) {
         ),
       ]);
 
-      return Response.json({ ok: true, assignmentId, athleteCount: athleteIds.length });
+      return Response.json({
+        ok: true,
+        assignmentId,
+        athleteCount: athleteIds.length,
+      });
     }
 
     if (input.action === 'archive') {
       if (!input.routineId) {
         return Response.json({ error: 'Rutina inválida.' }, { status: 400 });
       }
+      const owned = await db
+        .prepare(
+          'SELECT id FROM routines WHERE id = ? AND trainer_account_id = ?',
+        )
+        .bind(input.routineId, user.trainerAccountId)
+        .first();
+      if (!owned)
+        return Response.json({ error: 'Rutina inválida.' }, { status: 404 });
       await db.batch([
         db
-          .prepare("UPDATE routines SET status = 'archived' WHERE id = ?")
-          .bind(input.routineId),
+          .prepare(
+            "UPDATE routines SET status = 'archived' WHERE id = ? AND trainer_account_id = ?",
+          )
+          .bind(input.routineId, user.trainerAccountId),
         db
           .prepare(
             `UPDATE athlete_routine_instances SET status = 'cancelled'
@@ -352,11 +392,14 @@ async function resolveAthletes(
   db: D1Database,
   targetType: 'group' | 'athlete',
   targetId: string,
+  trainerAccountId: string,
 ) {
   if (targetType === 'athlete') {
     const athlete = await db
-      .prepare("SELECT id FROM athletes WHERE id = ? AND status = 'active'")
-      .bind(targetId)
+      .prepare(
+        "SELECT id FROM athletes WHERE id = ? AND trainer_account_id = ? AND status = 'active'",
+      )
+      .bind(targetId, trainerAccountId)
       .first<{ id: string }>();
     return athlete ? [athlete.id] : [];
   }
@@ -364,17 +407,23 @@ async function resolveAthletes(
     .prepare(
       `SELECT a.id FROM group_memberships gm
       JOIN groups g ON g.id = gm.group_id
+      JOIN organizations o ON o.id = g.organization_id
       JOIN athletes a ON a.id = gm.athlete_id
       WHERE gm.group_id = ? AND gm.ended_at IS NULL
-        AND g.active = 1 AND a.status = 'active'`,
+        AND g.active = 1 AND a.status = 'active'
+        AND o.trainer_account_id = ? AND a.trainer_account_id = ?`,
     )
-    .bind(targetId)
+    .bind(targetId, trainerAccountId, trainerAccountId)
     .all<{ id: string }>();
   return result.results.map((row) => row.id);
 }
 
 function validateContent(input: RoutineContent | undefined) {
-  if (!input || !Array.isArray(input.weekPlans) || !Array.isArray(input.rows)) {
+  if (
+    !input ||
+    !Array.isArray(input.weekPlans) ||
+    (!Array.isArray(input.rows) && !Array.isArray(input.sessions))
+  ) {
     return null;
   }
   const weekPlans = input.weekPlans
@@ -392,36 +441,73 @@ function validateContent(input: RoutineContent | undefined) {
     });
   if (weekPlans.length === 0) return null;
 
-  const rows = input.rows
-    .slice(0, 150)
-    .filter((row) => row && typeof row === 'object')
-    .map((row, index) => {
-      const value = row as Record<string, unknown>;
+  const legacyRows = normalizeRows(input.rows, weekPlans.length);
+  const sessionInputs = Array.isArray(input.sessions)
+    ? input.sessions.slice(0, 4)
+    : [];
+  const sessions = sessionInputs
+    .filter((session) => session && typeof session === 'object')
+    .map((session, index) => {
+      const value = session as Record<string, unknown>;
       return {
-        id:
-          typeof value.id === 'string' || typeof value.id === 'number'
-            ? value.id
-            : index + 1,
-        block: cleanText(value.block, 12) || 'A',
-        category: cleanText(value.category, 40) || 'Trabajo',
-        name: cleanText(value.name, 180),
-        values: normalizeWeekValues(value.values, weekPlans.length),
-        rir: normalizeWeekValues(value.rir, weekPlans.length),
+        id: cleanText(value.id, 80) || `day-${index + 1}`,
+        weekday: cleanNumber(value.weekday, 1, 7, index + 1),
+        name:
+          cleanText(value.name, 140) ||
+          `Día ${String.fromCharCode(65 + index)}`,
+        warmup: cleanText(value.warmup, 500),
+        instructions: cleanText(value.instructions, 2000),
+        rows: normalizeRows(value.rows, weekPlans.length),
       };
-    })
-    .filter((row) => row.name);
-  if (rows.length === 0) return null;
+    });
+  if (
+    sessionInputs.length > 0 &&
+    (sessions.length < 2 ||
+      sessions.some((session) => session.rows.length === 0) ||
+      new Set(sessions.map((session) => session.weekday)).size !==
+        sessions.length)
+  ) {
+    return null;
+  }
+  if (sessions.length === 0 && legacyRows.length === 0) return null;
+
+  const firstSession = sessions[0];
+  const rows = firstSession?.rows ?? legacyRows;
 
   return {
-    sessionName: cleanText(input.sessionName, 140),
-    warmup: cleanText(input.warmup, 500),
-    instructions: cleanText(input.instructions, 2000),
-    weeklyGoal: cleanNumber(input.weeklyGoal, 1, 14, 3),
+    sessionName: firstSession?.name ?? cleanText(input.sessionName, 140),
+    warmup: firstSession?.warmup ?? cleanText(input.warmup, 500),
+    instructions:
+      firstSession?.instructions ?? cleanText(input.instructions, 2000),
+    weeklyGoal: sessions.length || cleanNumber(input.weeklyGoal, 1, 14, 3),
     activeWeek: cleanNumber(input.activeWeek, 0, weekPlans.length - 1, 0),
     sessionKey: `week-${cleanText(weekPlans[cleanNumber(input.activeWeek, 0, weekPlans.length - 1, 0)]?.number, 30) || 1}-session-1`,
     weekPlans,
     rows,
+    ...(sessions.length ? { sessions } : {}),
   };
+}
+
+function normalizeRows(value: unknown, weekCount: number) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .slice(0, 150)
+    .filter((row) => row && typeof row === 'object')
+    .map((row, index) => {
+      const record = row as Record<string, unknown>;
+      return {
+        id:
+          typeof record.id === 'string' || typeof record.id === 'number'
+            ? record.id
+            : index + 1,
+        block: cleanText(record.block, 12) || 'A',
+        category: cleanText(record.category, 40) || 'Trabajo',
+        name: cleanText(record.name, 180),
+        values: normalizeWeekValues(record.values, weekCount),
+        rir: normalizeWeekValues(record.rir, weekCount),
+      };
+    })
+    .filter((row) => row.name);
 }
 
 function normalizeWeekValues(value: unknown, length: number) {

@@ -300,7 +300,9 @@ function TodayView({
               Hola, {data.athlete.firstName}
             </p>
             <h1 className="mt-1 text-[28px] font-bold leading-tight tracking-[-0.05em] sm:text-3xl">
-              Tu entrenamiento de hoy
+              {routine && !routine.scheduledToday
+                ? 'Hoy toca recuperar'
+                : 'Tu entrenamiento de hoy'}
             </h1>
           </div>
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-[#c8f15a]">
@@ -320,7 +322,7 @@ function TodayView({
           />
           <QuickStat
             icon={Activity}
-            value={routine ? `${routine.targetPse}/10` : '—'}
+            value={routine?.scheduledToday ? `${routine.targetPse}/10` : '—'}
             label="PSE meta"
           />
         </div>
@@ -328,6 +330,8 @@ function TodayView({
 
       {!routine ? (
         <EmptyRoutine />
+      ) : !routine.scheduledToday ? (
+        <RestDayCard routine={routine} />
       ) : (
         <>
           <section className="rounded-[24px] border border-[#dfe5db] bg-white p-5 shadow-[0_18px_60px_-52px_#10253d]">
@@ -476,6 +480,47 @@ function ExerciseCard({
   );
 }
 
+function RestDayCard({
+  routine,
+}: {
+  routine: NonNullable<AthletePortalData['routine']>;
+}) {
+  return (
+    <section className="overflow-hidden rounded-[26px] border border-[#dfe5db] bg-white p-5 shadow-[0_18px_60px_-52px_#10253d] sm:p-6">
+      <div className="flex items-start gap-4">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#edf4e1] text-[#52751d]">
+          <CalendarDays className="size-5" />
+        </span>
+        <div>
+          <Badge className="border-0 bg-[#f1f7e8] text-[#52751d]">
+            {routine.todayLabel} · descanso
+          </Badge>
+          <h2 className="mt-3 text-xl font-bold tracking-[-0.035em]">
+            No tenés una sesión programada hoy
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-[#667480]">
+            {routine.nextSession
+              ? `La próxima es ${routine.nextSession.name}, el ${routine.nextSession.weekdayLabel.toLowerCase()}${routine.nextSession.daysAway === 1 ? ' (mañana)' : `, dentro de ${routine.nextSession.daysAway} días`}.`
+              : 'Tu PF todavía no definió el próximo día de trabajo.'}
+          </p>
+        </div>
+      </div>
+      <div className="mt-5 grid gap-2 sm:grid-cols-2">
+        {routine.sessions.map((session) => (
+          <div key={session.id} className="rounded-2xl bg-[#f4f6f1] p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#6f7f68]">
+              {session.weekdayLabel}
+            </p>
+            <p className="mt-1 truncate text-sm font-semibold">
+              {session.name}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PlanView({ data }: { data: AthletePortalData }) {
   return (
     <div className="space-y-4">
@@ -496,6 +541,44 @@ function PlanView({ data }: { data: AthletePortalData }) {
             <p className="mt-2 text-sm leading-6 text-white/60">
               {data.routine.description}
             </p>
+          </section>
+          <section className="rounded-[24px] border border-[#dfe5db] bg-white p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#75828c]">
+                  Semana tipo
+                </p>
+                <h2 className="mt-1 text-xl font-bold">
+                  {data.routine.sessions.length} días de entrenamiento
+                </h2>
+              </div>
+              <CalendarDays className="size-5 text-[#52751d]" />
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {data.routine.sessions.map((session) => (
+                <article
+                  key={session.id}
+                  className={cn(
+                    'rounded-2xl border p-3',
+                    session.isToday
+                      ? 'border-[#9fcf2d] bg-[#f3f9e8]'
+                      : 'border-[#e2e7df] bg-[#f8f9f6]',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold uppercase tracking-[0.1em] text-[#63745b]">
+                      {session.weekdayLabel}
+                    </p>
+                    {session.isToday && (
+                      <Badge className="border-0 bg-[#10253d] text-[#c8f15a]">
+                        Hoy
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-2 font-semibold">{session.name}</p>
+                </article>
+              ))}
+            </div>
           </section>
           <div className="space-y-3">
             {data.routine.weeks.map((week) => (

@@ -20,7 +20,11 @@ export async function POST(request: Request) {
     if (!athleteId) {
       return Response.json({ error: 'Deportista inválido.' }, { status: 400 });
     }
-    const token = await createAthleteAccessToken(athleteId, user.id);
+    const token = await createAthleteAccessToken(
+      athleteId,
+      user.id,
+      user.trainerAccountId,
+    );
     return Response.json({
       url: new URL(`/acceso/${token}`, request.url).toString(),
       expiresInDays: 7,

@@ -4,7 +4,8 @@ import { getStaffSessionFromRequest, isSameOrigin } from '@/lib/auth';
 export const runtime = 'edge';
 
 export async function GET(request: Request) {
-  if (!(await getStaffSessionFromRequest(request)))
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const athletes = await getD1()
     .prepare(
@@ -17,18 +18,20 @@ export async function GET(request: Request) {
     FROM athletes a
     LEFT JOIN group_memberships gm ON gm.athlete_id = a.id
     LEFT JOIN groups g ON g.id = gm.group_id
-    WHERE a.status != 'archived'
+    WHERE a.status != 'archived' AND a.trainer_account_id = ?
     GROUP BY a.id, a.first_name, a.last_name, a.email, a.primary_position,
       a.phone, a.birth_date, a.country_code, a.primary_context, a.status, a.created_at
     ORDER BY a.last_name, a.first_name LIMIT 500`,
     )
+    .bind(user.trainerAccountId)
     .all();
 
   return Response.json({ athletes: athletes.results });
 }
 
 export async function POST(request: Request) {
-  if (!(await getStaffSessionFromRequest(request)))
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
@@ -59,16 +62,45 @@ export async function POST(request: Request) {
   const id = crypto.randomUUID();
 
   try {
+    const capacity = await db
+      .prepare(`SELECT ta.max_athletes AS maxAthletes,
+        (SELECT COUNT(*) FROM athletes a
+          WHERE a.trainer_account_id = ta.id AND a.status != 'archived') AS athleteCount
+        FROM trainer_accounts ta WHERE ta.id = ?`)
+      .bind(user.trainerAccountId)
+      .first<{ maxAthletes: number; athleteCount: number }>();
+    if (
+      !capacity ||
+      Number(capacity.athleteCount) >= Number(capacity.maxAthletes)
+    ) {
+      return Response.json(
+        { error: 'Alcanzaste el límite de deportistas de tu plan.' },
+        { status: 409 },
+      );
+    }
+    if (input.groupId) {
+      const allowedGroup = await db
+        .prepare(`SELECT g.id FROM groups g JOIN organizations o ON o.id = g.organization_id
+          WHERE g.id = ? AND o.trainer_account_id = ? AND g.active = 1`)
+        .bind(input.groupId, user.trainerAccountId)
+        .first();
+      if (!allowedGroup)
+        return Response.json(
+          { error: 'El grupo no está disponible.' },
+          { status: 404 },
+        );
+    }
     const statements = [
       db
         .prepare(
           `INSERT INTO athletes
-        (id, first_name, last_name, email, phone, birth_date, country_code,
+        (id, trainer_account_id, first_name, last_name, email, phone, birth_date, country_code,
           primary_position, primary_context, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
         )
         .bind(
           id,
+          user.trainerAccountId,
           firstName,
           lastName,
           email,
@@ -110,7 +142,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!(await getStaffSessionFromRequest(request)))
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
@@ -145,7 +178,7 @@ export async function PATCH(request: Request) {
       .prepare(`UPDATE athletes SET
       first_name = ?, last_name = ?, email = ?, phone = ?, birth_date = ?,
       country_code = ?, primary_position = ?, primary_context = ?, status = ?
-      WHERE id = ? AND status != 'archived'`)
+      WHERE id = ? AND trainer_account_id = ? AND status != 'archived'`)
       .bind(
         firstName,
         lastName,
@@ -157,6 +190,7 @@ export async function PATCH(request: Request) {
         optionalText(input.primaryContext),
         status,
         id,
+        user.trainerAccountId,
       )
       .run();
     if (!result.meta.changes)
@@ -182,7 +216,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await getStaffSessionFromRequest(request)))
+  const user = await getStaffSessionFromRequest(request);
+  if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
@@ -194,9 +229,9 @@ export async function DELETE(request: Request) {
   const db = getD1();
   const existing = await db
     .prepare(
-      "SELECT id FROM athletes WHERE id = ? AND status != 'archived' LIMIT 1",
+      "SELECT id FROM athletes WHERE id = ? AND trainer_account_id = ? AND status != 'archived' LIMIT 1",
     )
-    .bind(id)
+    .bind(id, user.trainerAccountId)
     .first();
   if (!existing)
     return Response.json(
@@ -206,7 +241,11 @@ export async function DELETE(request: Request) {
 
   const now = Date.now();
   await db.batch([
-    db.prepare("UPDATE athletes SET status = 'archived' WHERE id = ?").bind(id),
+    db
+      .prepare(
+        "UPDATE athletes SET status = 'archived' WHERE id = ? AND trainer_account_id = ?",
+      )
+      .bind(id, user.trainerAccountId),
     db
       .prepare(
         'UPDATE group_memberships SET ended_at = ? WHERE athlete_id = ? AND ended_at IS NULL',
@@ -225,7 +264,9 @@ export async function DELETE(request: Request) {
       )
       .bind(now, id),
     db
-      .prepare("UPDATE users SET status = 'disabled' WHERE athlete_id = ? AND role = 'athlete'")
+      .prepare(
+        "UPDATE users SET status = 'disabled' WHERE athlete_id = ? AND role = 'athlete'",
+      )
       .bind(id),
   ]);
   return Response.json({ ok: true });

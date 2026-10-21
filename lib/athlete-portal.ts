@@ -1,4 +1,10 @@
 import { getD1 } from '@/db';
+import {
+  DEFAULT_TRAINING_DAYS,
+  daysUntilWeekday,
+  scheduleDate,
+  weekdayLabel,
+} from '@/lib/routine-schedule';
 
 export type PortalExercise = {
   id: string;
@@ -43,10 +49,24 @@ export type AthletePortalData = {
     warmup: string;
     instructions: string;
     sessionKey: string;
+    scheduledToday: boolean;
+    todayLabel: string;
     targetPse: number;
     weeklyGoal: number;
     exercises: PortalExercise[];
     weeks: PortalWeek[];
+    sessions: Array<{
+      id: string;
+      name: string;
+      weekday: number;
+      weekdayLabel: string;
+      isToday: boolean;
+    }>;
+    nextSession: {
+      name: string;
+      weekdayLabel: string;
+      daysAway: number;
+    } | null;
   } | null;
   progress: {
     completedExerciseIds: string[];
@@ -117,7 +137,7 @@ export async function getAthletePortalData(
 
   const routine = instance ? parseRoutine(instance) : null;
   const [currentLog, completedLogs, evaluationRows] = await Promise.all([
-    routine
+    routine?.scheduledToday
       ? db
           .prepare(
             `SELECT completed_at AS completedAt, pse, pain, notes, actual_values AS actualValues
@@ -168,7 +188,7 @@ export async function getAthletePortalData(
     ? actualValues.completedExerciseIds.map(String)
     : [];
   const completedDates = completedLogs.results.map((row) => row.completedAt);
-  const weekStart = startOfWeek(Date.now());
+  const weekStart = Date.parse(`${scheduleDate().weekKey}T00:00:00-03:00`);
   const weeklySessions = completedDates.filter(
     (timestamp) => timestamp >= weekStart,
   ).length;
@@ -209,7 +229,6 @@ function parseRoutine(instance: {
     ...asRecord(instance.content),
     ...asRecord(instance.overrides),
   };
-  const rows = Array.isArray(content.rows) ? content.rows.map(asRecord) : [];
   const weekPlans = Array.isArray(content.weekPlans)
     ? content.weekPlans.map(asRecord)
     : [];
@@ -219,23 +238,39 @@ function parseRoutine(instance: {
     Math.max(0, weekPlans.length - 1),
   );
   const activePlan = weekPlans[activeWeek] ?? {};
-  const sessionKey =
-    textValue(content.sessionKey) ||
-    `week-${textValue(activePlan.number) || activeWeek + 1}-session-1`;
+  const schedule = scheduleDate();
+  const sessions = routineSessions(content);
+  const selectedSession = sessions.find(
+    (session) => session.weekday === schedule.weekday,
+  );
+  const nextSession = sessions
+    .map((session) => ({
+      session,
+      daysAway: daysUntilWeekday(schedule.weekday, session.weekday),
+    }))
+    .sort((left, right) => left.daysAway - right.daysAway)[0];
+  const sessionKey = selectedSession
+    ? `week-${schedule.weekKey}-cycle-${textValue(activePlan.number) || activeWeek + 1}-session-${selectedSession.id}`
+    : '';
   const targetPse = clampInteger(activePlan.pse ?? content.targetPse, 0, 10, 5);
+  const rows = selectedSession?.rows ?? [];
 
   return {
     instanceId: instance.instanceId,
     name: instance.name,
     description: instance.description ?? '',
-    sessionName: textValue(content.sessionName) || instance.name,
-    warmup:
-      textValue(content.warmup) ||
-      'Realizá la entrada en calor indicada por tu preparador físico.',
-    instructions: textValue(content.instructions),
+    sessionName:
+      selectedSession?.name || nextSession?.session.name || instance.name,
+    warmup: selectedSession
+      ? selectedSession.warmup ||
+        'Realizá la entrada en calor indicada por tu preparador físico.'
+      : '',
+    instructions: selectedSession?.instructions ?? '',
     sessionKey,
+    scheduledToday: Boolean(selectedSession),
+    todayLabel: weekdayLabel(schedule.weekday),
     targetPse,
-    weeklyGoal: clampInteger(content.weeklyGoal, 1, 14, 3),
+    weeklyGoal: sessions.length,
     exercises: rows
       .filter((row) => textValue(row.name))
       .map((row, index) => {
@@ -264,7 +299,59 @@ function parseRoutine(instance: {
             ? ('current' as const)
             : ('upcoming' as const),
     })),
+    sessions: sessions.map((session) => ({
+      id: session.id,
+      name: session.name,
+      weekday: session.weekday,
+      weekdayLabel: weekdayLabel(session.weekday),
+      isToday: session.weekday === schedule.weekday,
+    })),
+    nextSession: nextSession
+      ? {
+          name: nextSession.session.name,
+          weekdayLabel: weekdayLabel(nextSession.session.weekday),
+          daysAway: nextSession.daysAway,
+        }
+      : null,
   };
+}
+
+function routineSessions(content: Record<string, unknown>) {
+  const rawSessions = Array.isArray(content.sessions)
+    ? content.sessions.map(asRecord).slice(0, 4)
+    : [];
+  if (rawSessions.length >= 2) {
+    return rawSessions.map((session, index) => ({
+      id: textValue(session.id) || `day-${index + 1}`,
+      weekday: clampInteger(
+        session.weekday,
+        1,
+        7,
+        DEFAULT_TRAINING_DAYS[index] ?? index + 1,
+      ),
+      name: textValue(session.name) || `Día ${String.fromCharCode(65 + index)}`,
+      warmup: textValue(session.warmup),
+      instructions: textValue(session.instructions),
+      rows: Array.isArray(session.rows) ? session.rows.map(asRecord) : [],
+    }));
+  }
+
+  const legacyRows = Array.isArray(content.rows)
+    ? content.rows.map(asRecord)
+    : [];
+  const count = clampInteger(content.weeklyGoal, 2, 4, 3);
+  const baseName = textValue(content.sessionName);
+  return Array.from({ length: count }, (_, index) => ({
+    id: `legacy-day-${index + 1}`,
+    weekday: DEFAULT_TRAINING_DAYS[index] ?? index + 1,
+    name:
+      index === 0 && baseName
+        ? baseName
+        : `Día ${String.fromCharCode(65 + index)}`,
+    warmup: textValue(content.warmup),
+    instructions: textValue(content.instructions),
+    rows: legacyRows,
+  }));
 }
 
 function evaluationSummary(

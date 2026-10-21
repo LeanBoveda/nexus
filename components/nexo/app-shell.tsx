@@ -5,6 +5,7 @@ import {
   Dumbbell,
   LayoutDashboard,
   Plus,
+  ShieldCheck,
   Sparkles,
   Users,
   UsersRound,
@@ -140,6 +141,16 @@ export async function AppShell({
           </a>
         </div>
 
+        {user.isPlatformAdmin ? (
+          <a
+            href="/admin"
+            className="mt-3 flex items-center gap-3 rounded-xl border border-[#c6da96] bg-[#f3f8e8] px-3 py-2.5 text-[#45621a] transition hover:bg-[#eaf3d6]"
+          >
+            <ShieldCheck className="size-4" />
+            <span className="text-xs font-bold">Administrar negocio</span>
+          </a>
+        ) : null}
+
         <div className="mt-3 flex items-center gap-3 rounded-xl px-2 py-2 text-left">
           <Avatar size="lg">
             <AvatarFallback className="bg-[#dce6ee] text-xs font-bold text-[#10253d]">
@@ -165,6 +176,18 @@ export async function AppShell({
             <span className="text-sm font-bold tracking-tight">NEXO</span>
           </a>
           <div className="ml-auto flex items-center gap-2">
+            {user.isPlatformAdmin ? (
+              <a
+                href="/admin"
+                aria-label="Administrar negocio"
+                className={cn(
+                  buttonVariants({ variant: 'outline', size: 'icon' }),
+                  'size-9 rounded-xl bg-card text-[#52751d]',
+                )}
+              >
+                <ShieldCheck className="size-4" />
+              </a>
+            ) : null}
             <a
               href="/rutinas/nueva"
               className={cn(
