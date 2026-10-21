@@ -1,4 +1,5 @@
 import { AuthError, authenticate, createOwner, destroySession, expiredSessionCookie, getAuthStatus, isSameOrigin, sessionCookie } from '@/lib/auth';
+import { emailReady } from '@/lib/email-login';
 
 export const runtime = 'edge';
 
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
   if (!isSameOrigin(request)) return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
 
   try {
+    if (await emailReady()) return Response.json({ error: 'Ingresá solicitando un enlace a tu email.' }, { status: 410 });
     const input = await request.json() as {
       action?: 'bootstrap' | 'login';
       name?: string;

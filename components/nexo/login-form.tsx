@@ -6,19 +6,21 @@ import { ArrowRight, CheckCircle2, Eye, EyeOff, KeyRound, Link2, ShieldCheck, Sp
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 
-export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
+export function LoginForm({ setupRequired, emailEnabled = false }: { setupRequired: boolean; emailEnabled?: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError('');
+    setMessage('');
     const form = new FormData(event.currentTarget);
 
     try {
-      const response = await fetch('/api/auth/session', {
+      const response = await fetch(emailEnabled ? '/api/auth/email' : '/api/auth/session', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -29,8 +31,9 @@ export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
           activationCode: form.get('activationCode'),
         }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as { error?: string; message?: string };
       if (!response.ok) throw new Error(result.error ?? 'No pudimos completar el ingreso.');
+      if (emailEnabled) { setMessage(result.message ?? 'Revisá tu correo.'); return; }
       window.location.assign('/');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No pudimos completar el ingreso.');
@@ -67,25 +70,26 @@ export function LoginForm({ setupRequired }: { setupRequired: boolean }) {
           <div className="mb-9 flex items-center gap-3 lg:hidden"><span className="grid size-9 place-items-center rounded-xl bg-[#c8f15a] text-[#10253d]"><Zap className="size-4" fill="currentColor" /></span><span className="font-bold tracking-tight text-[#10253d]">NEXO</span></div>
           <div className="rounded-[24px] border border-[#dedaCE] bg-white p-6 shadow-[0_24px_70px_-50px_#10253d] sm:p-8">
             <span className="grid size-11 place-items-center rounded-2xl bg-[#edf4e1] text-[#52751d]"><ShieldCheck className="size-5" /></span>
-            <h2 className="mt-5 text-2xl font-bold tracking-[-0.045em] text-[#10253d]">{setupRequired ? 'Activá tu cuenta de PF' : 'Ingresá a Nexo'}</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{setupRequired ? 'Creá la primera cuenta administradora. Esto se realiza una sola vez.' : 'Usá las credenciales de tu cuenta de preparador físico.'}</p>
+            <h2 className="mt-5 text-2xl font-bold tracking-[-0.045em] text-[#10253d]">{emailEnabled ? 'Ingresá sin contraseña' : setupRequired ? 'Activá tu cuenta de PF' : 'Ingresá a Nexo'}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{emailEnabled ? 'Ingresá tu email y te enviaremos un enlace seguro. Sirve para profesores, deportistas y administradores.' : setupRequired ? 'Creá la primera cuenta administradora. Esto se realiza una sola vez.' : 'Usá las credenciales de tu cuenta de preparador físico.'}</p>
 
             <form onSubmit={submit} className="mt-7 space-y-4">
-              {setupRequired && <div className="space-y-1.5"><Label htmlFor="login-name">Nombre completo</Label><LoginInput id="login-name" name="name" autoComplete="name" placeholder="Manuel Abalsamo" required /></div>}
+              {setupRequired && !emailEnabled && <div className="space-y-1.5"><Label htmlFor="login-name">Nombre completo</Label><LoginInput id="login-name" name="name" autoComplete="name" placeholder="Manuel Abalsamo" required /></div>}
               <div className="space-y-1.5"><Label htmlFor="login-email">Email</Label><LoginInput id="login-email" name="email" type="email" autoComplete="email" placeholder="pf@equipo.com" required /></div>
-              <div className="space-y-1.5">
+              {!emailEnabled && <div className="space-y-1.5">
                 <Label htmlFor="login-password">Contraseña</Label>
                 <div className="relative"><LoginInput id="login-password" name="password" type={showPassword ? 'text' : 'password'} autoComplete={setupRequired ? 'new-password' : 'current-password'} placeholder={setupRequired ? 'Mínimo 10 caracteres' : 'Tu contraseña'} minLength={setupRequired ? 10 : undefined} required className="pr-11" /><button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} className="absolute inset-y-0 right-0 grid w-11 place-items-center text-muted-foreground hover:text-foreground">{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div>
-              </div>
-              {setupRequired && <div className="space-y-1.5"><Label htmlFor="activation-code">Código de activación</Label><div className="relative"><KeyRound className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><LoginInput id="activation-code" name="activationCode" autoComplete="one-time-code" placeholder="Código entregado por Nexo" required className="pl-9 font-mono uppercase tracking-wider" /></div></div>}
+              </div>}
+              {setupRequired && !emailEnabled && <div className="space-y-1.5"><Label htmlFor="activation-code">Código de activación</Label><div className="relative"><KeyRound className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><LoginInput id="activation-code" name="activationCode" autoComplete="one-time-code" placeholder="Código entregado por Nexo" required className="pl-9 font-mono uppercase tracking-wider" /></div></div>}
               {error && <p role="alert" className="rounded-xl bg-[#fff0ed] px-3 py-2.5 text-xs font-medium text-[#a23f30]">{error}</p>}
-              <button type="submit" disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#10253d] px-4 text-sm font-semibold text-white transition hover:bg-[#183653] disabled:pointer-events-none disabled:opacity-55">{loading ? 'Ingresando…' : setupRequired ? 'Crear cuenta e ingresar' : 'Ingresar'}<ArrowRight className="size-4" /></button>
+              {message && <p role="status" className="rounded-xl bg-[#edf4e1] p-3 text-sm text-[#52751d]">{message}</p>}
+              <button type="submit" disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#10253d] px-4 text-sm font-semibold text-white transition hover:bg-[#183653] disabled:pointer-events-none disabled:opacity-55">{loading ? 'Procesando…' : emailEnabled ? 'Enviarme enlace de acceso' : setupRequired ? 'Crear cuenta e ingresar' : 'Ingresar'}<ArrowRight className="size-4" /></button>
             </form>
           </div>
 
           <div className="mt-4 flex gap-3 rounded-2xl border border-[#dedaCE] bg-white/55 p-4">
             <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#fff5dc] text-[#8c661e]"><Link2 className="size-4" /></span>
-            <div><p className="text-sm font-semibold text-[#10253d]">¿Sos deportista?</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Ingresarás desde el enlace personal que te envíe tu PF. No necesitás crear una contraseña.</p></div>
+            <div><p className="text-sm font-semibold text-[#10253d]">¿Sos deportista?</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{emailEnabled ? 'Usá el correo que tu PF cargó en tu ficha. Si no recibís el enlace, pedile que verifique tu email y que tu cuenta esté habilitada.' : 'Ingresarás desde el enlace personal que te envíe tu PF. No necesitás crear una contraseña.'}</p></div>
           </div>
         </div>
       </section>

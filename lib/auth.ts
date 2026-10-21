@@ -345,7 +345,7 @@ export class AuthError extends Error {
   }
 }
 
-async function createSession(userId: string) {
+export async function createSession(userId: string) {
   const token = randomToken(32);
   const now = Date.now();
   await env.DB.prepare(`INSERT INTO auth_sessions

@@ -438,3 +438,24 @@ export const loginAttempts = sqliteTable('login_attempts', {
   }).notNull(),
   blockedUntil: integer('blocked_until', { mode: 'timestamp_ms' }),
 });
+
+export const emailIntegration = sqliteTable('email_integration', {
+  id: text('id').primaryKey(),
+  sender: text('sender').notNull(),
+  encryptedRefreshToken: text('encrypted_refresh_token').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const emailTokens = sqliteTable('email_tokens', {
+  tokenHash: text('token_hash').primaryKey(),
+  kind: text('kind').notNull(),
+  subject: text('subject').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  usedAt: integer('used_at'),
+}, (table) => [index('email_tokens_expiry_idx').on(table.expiresAt)]);
+
+export const emailRateLimits = sqliteTable('email_rate_limits', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  resetAt: integer('reset_at').notNull(),
+});

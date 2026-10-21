@@ -240,6 +240,7 @@ export function BusinessAdmin({ userName }: { userName: string }) {
               Administrador del sistema
             </p>
           </div>
+          <a href="/api/admin/email/connect" className="rounded-lg border border-white/20 px-3 py-2 text-xs hover:bg-white/10">Conectar Gmail</a>
           <ShieldCheck className="size-5 text-[#c8f15a]" />
         </div>
       </header>
