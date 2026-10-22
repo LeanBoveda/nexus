@@ -75,13 +75,13 @@ export async function POST(request: Request) {
     if (input.action === 'create') {
       const groupName = input.groupName?.trim();
       const organizationName = input.organizationName?.trim();
-      const organizationTypes = ['national_team', 'club', 'gym', 'independent'];
-      const sports = ['handball_indoor', 'beach_handball', 'general'];
+      const organizationType = typeof input.organizationType === 'string' ? input.organizationType.trim() : '';
+      const sport = typeof input.sport === 'string' ? input.sport.trim() : '';
       if (
         !groupName ||
         !organizationName ||
-        !organizationTypes.includes(input.organizationType ?? '') ||
-        !sports.includes(input.sport ?? '')
+        !organizationType || organizationType.length > 100 ||
+        !sport || sport.length > 100 || groupName.length > 140 || organizationName.length > 140
       ) {
         return Response.json(
           { error: 'Completá los datos del grupo.' },
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
               organization.id,
               user.trainerAccountId,
               organizationName,
-              input.organizationType,
+              organizationType,
               Date.now(),
             ),
         );
@@ -135,7 +135,7 @@ export async function POST(request: Request) {
             groupId,
             organization.id,
             groupName,
-            input.sport,
+            sport,
             input.season?.trim() || null,
             Date.now(),
           ),

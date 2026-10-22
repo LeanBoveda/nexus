@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://nexo-rendimiento.cuentagpt050.chatgpt.site'),
   title: 'Nexo · Rendimiento deportivo',
   description:
-    'Planificación, seguimiento y evaluación para preparadores físicos de handball indoor y beach handball.',
+    'Planificación, seguimiento y evaluación para preparadores físicos y deportistas de cualquier disciplina.',
   openGraph: {
     title: 'Nexo · Rendimiento deportivo',
     description: 'Rutinas flexibles, seguimiento individual y evaluaciones para equipos y deportistas.',

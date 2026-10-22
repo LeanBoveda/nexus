@@ -834,50 +834,24 @@ function AthleteFormDialog({
               />
             </Field>
             <Field label="Posición / rol" htmlFor="client-position">
-              <NativeSelect
+              <Input
                 id="client-position"
                 name="position"
                 defaultValue={athlete?.primaryPosition ?? ''}
-                className="w-full"
-              >
-                <NativeSelectOption value="">Sin definir</NativeSelectOption>
-                {[
-                  'Lateral',
-                  'Extremo',
-                  'Central',
-                  'Pivote',
-                  'Arquero',
-                  'Especialista beach',
-                  'Cliente gimnasio',
-                ].map((position) => (
-                  <NativeSelectOption key={position} value={position}>
-                    {position}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
+                placeholder="Escribí la posición o el rol"
+                maxLength={100}
+              />
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Contexto principal" htmlFor="client-context">
-              <NativeSelect
+              <Input
                 id="client-context"
                 name="primaryContext"
-                defaultValue={athlete?.primaryContext ?? ''}
-                className="w-full"
-              >
-                <NativeSelectOption value="">Sin definir</NativeSelectOption>
-                <NativeSelectOption value="national_team">
-                  Selección
-                </NativeSelectOption>
-                <NativeSelectOption value="club">Club</NativeSelectOption>
-                <NativeSelectOption value="gym">Gimnasio</NativeSelectOption>
-                <NativeSelectOption value="independent">
-                  Cliente particular
-                </NativeSelectOption>
-                <NativeSelectOption value="international">
-                  Exterior
-                </NativeSelectOption>
-              </NativeSelect>
+                defaultValue={athlete?.primaryContext ? contextLabel(athlete.primaryContext) : ''}
+                placeholder="Deporte, disciplina o ámbito"
+                maxLength={100}
+              />
             </Field>
             {editing ? (
               <Field label="Estado" htmlFor="client-status">
@@ -1032,5 +1006,5 @@ function contextLabel(value: string | null) {
   if (value === 'gym') return 'Gimnasio';
   if (value === 'independent') return 'Particular';
   if (value === 'international') return 'Exterior';
-  return 'Sin definir';
+  return value || 'Sin definir';
 }

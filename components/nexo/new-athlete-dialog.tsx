@@ -174,30 +174,12 @@ export function NewAthleteDialog({
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="position">Posición / rol</Label>
-                  <NativeSelect
+                  <Input
                     id="position"
                     name="position"
-                    defaultValue="Lateral"
-                  >
-                    <NativeSelectOption value="Lateral">
-                      Lateral
-                    </NativeSelectOption>
-                    <NativeSelectOption value="Extremo">
-                      Extremo
-                    </NativeSelectOption>
-                    <NativeSelectOption value="Central">
-                      Central
-                    </NativeSelectOption>
-                    <NativeSelectOption value="Pivote">
-                      Pivote
-                    </NativeSelectOption>
-                    <NativeSelectOption value="Arquero">
-                      Arquero
-                    </NativeSelectOption>
-                    <NativeSelectOption value="Especialista beach">
-                      Especialista beach
-                    </NativeSelectOption>
-                  </NativeSelect>
+                    placeholder="Posición o rol (opcional)"
+                    maxLength={100}
+                  />
                 </div>
               </div>
               {error && (

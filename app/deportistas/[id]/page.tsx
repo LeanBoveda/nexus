@@ -527,7 +527,7 @@ function contextLabel(value: string | null) {
   if (value === 'gym') return 'Gimnasio';
   if (value === 'independent') return 'Cliente particular';
   if (value === 'international') return 'Exterior';
-  return 'Contexto sin definir';
+  return value || 'Contexto sin definir';
 }
 function formatNumber(value: number) {
   return new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 }).format(

@@ -64,9 +64,7 @@ export const organizations = sqliteTable('organizations', {
     { onDelete: 'cascade' },
   ),
   name: text('name').notNull(),
-  type: text('type', {
-    enum: ['national_team', 'club', 'gym', 'independent'],
-  }).notNull(),
+  type: text('type').notNull(),
   countryCode: text('country_code', { length: 2 }),
   createdAt,
 });
@@ -79,9 +77,7 @@ export const groups = sqliteTable(
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    sport: text('sport', {
-      enum: ['handball_indoor', 'beach_handball', 'general'],
-    }).notNull(),
+    sport: text('sport').notNull(),
     season: text('season'),
     active: integer('active', { mode: 'boolean' }).notNull().default(true),
     createdAt,

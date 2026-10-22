@@ -306,7 +306,7 @@ async function ensureTemplate(
 ) {
   const existing = await db
     .prepare(
-      "SELECT id FROM evaluation_templates WHERE name = 'Rendimiento handball' AND trainer_account_id = ? ORDER BY created_at LIMIT 1",
+      "SELECT id FROM evaluation_templates WHERE name IN ('Rendimiento deportivo', 'Rendimiento handball') AND trainer_account_id = ? ORDER BY created_at LIMIT 1",
     )
     .bind(trainerAccountId)
     .first<{ id: string }>();
@@ -318,7 +318,7 @@ async function ensureTemplate(
       .prepare(
         `INSERT INTO evaluation_templates
         (id, trainer_account_id, name, sport, description, created_by, created_at)
-        VALUES (?, ?, 'Rendimiento handball', 'general',
+        VALUES (?, ?, 'Rendimiento deportivo', 'general',
           'Batería editable de evaluaciones de rendimiento', ?, ?)`,
       )
       .bind(templateId, trainerAccountId, userId, Date.now()),

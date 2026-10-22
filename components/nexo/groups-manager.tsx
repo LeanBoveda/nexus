@@ -6,11 +6,11 @@ import { Archive, Building2, Check, ChevronRight, Dumbbell, Globe2, Layers3, Loa
 type Group = {
   id: string;
   name: string;
-  sport: 'handball_indoor' | 'beach_handball' | 'general';
+  sport: string;
   season: string | null;
   organizationId: string;
   organizationName: string;
-  organizationType: 'national_team' | 'club' | 'gym' | 'independent';
+  organizationType: string;
   memberCount: number;
 };
 
@@ -162,7 +162,19 @@ export function GroupsManager() {
         </section>
       </div>
 
-      {createOpen && <Modal title="Crear un grupo" description="Podés separar planteles por organización, modalidad y temporada." onClose={() => setCreateOpen(false)}><form onSubmit={createGroup} className="space-y-4"><Field label="Nombre del grupo"><input name="groupName" className={fieldClass} placeholder="Plantel superior" required /></Field><Field label="Organización"><input name="organizationName" className={fieldClass} placeholder="Selección Argentina, nombre del club…" required /></Field><div className="grid grid-cols-2 gap-3"><Field label="Tipo"><select name="organizationType" className={fieldClass} defaultValue="club"><option value="national_team">Selección</option><option value="club">Club</option><option value="gym">Gimnasio</option><option value="independent">Independiente</option></select></Field><Field label="Modalidad"><select name="sport" className={fieldClass} defaultValue="handball_indoor"><option value="handball_indoor">Handball indoor</option><option value="beach_handball">Beach handball</option><option value="general">Preparación general</option></select></Field></div><Field label="Temporada (opcional)"><input name="season" className={fieldClass} placeholder="2026" /></Field>{error && <p className="text-xs font-medium text-[#a23f30]">{error}</p>}<div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setCreateOpen(false)} className="h-9 rounded-xl px-3 text-xs font-semibold hover:bg-muted">Cancelar</button><button type="submit" disabled={saving} className="flex h-9 items-center gap-2 rounded-xl bg-[#10253d] px-4 text-xs font-semibold text-white disabled:opacity-50">{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Crear grupo</button></div></form></Modal>}
+      {createOpen && <Modal title="Crear un grupo" description="Organizá personas por deporte, actividad o institución." onClose={() => setCreateOpen(false)}>
+        <form onSubmit={createGroup} className="space-y-4">
+          <Field label="Nombre del grupo"><input name="groupName" className={fieldClass} placeholder="Nombre del equipo o grupo" maxLength={140} required /></Field>
+          <Field label="Organización"><input name="organizationName" className={fieldClass} placeholder="Club, gimnasio, institución o proyecto" maxLength={140} required /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Tipo de organización"><input name="organizationType" className={fieldClass} placeholder="Ej.: Academia, club, particular" maxLength={100} required /></Field>
+            <Field label="Deporte o actividad"><input name="sport" className={fieldClass} placeholder="Escribí el deporte o la actividad" maxLength={100} required /></Field>
+          </div>
+          <Field label="Temporada (opcional)"><input name="season" className={fieldClass} placeholder="2026" /></Field>
+          {error && <p className="text-xs font-medium text-[#a23f30]">{error}</p>}
+          <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setCreateOpen(false)} className="h-9 rounded-xl px-3 text-xs font-semibold hover:bg-muted">Cancelar</button><button type="submit" disabled={saving} className="flex h-9 items-center gap-2 rounded-xl bg-[#10253d] px-4 text-xs font-semibold text-white disabled:opacity-50">{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />} Crear grupo</button></div>
+        </form>
+      </Modal>}
 
       {membersOpen && selectedGroup && <Modal title={`Agregar a ${selectedGroup.name}`} description="Esta es la lista completa de deportistas cargados. Quienes ya integran el grupo aparecen identificados." onClose={() => setMembersOpen(false)}><div className="max-h-80 space-y-2 overflow-y-auto pr-1">{data.athletes.length === 0 ? <div className="rounded-xl bg-muted/50 p-5 text-center"><p className="text-sm font-semibold">Todavía no cargaste deportistas</p><p className="mt-1 text-xs text-muted-foreground">Creá sus fichas y luego vas a poder elegirlos desde esta lista.</p><a href="/deportistas" className="mt-3 inline-block text-xs font-semibold text-[#52751d] hover:underline">Ir a Deportistas</a></div> : data.athletes.map((athlete) => { const checked = selectedAthletes.includes(athlete.id); const alreadyMember = members.some((member) => member.athleteId === athlete.id); return <button key={athlete.id} type="button" disabled={alreadyMember} onClick={() => setSelectedAthletes((current) => checked ? current.filter((id) => id !== athlete.id) : [...current, athlete.id])} className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${alreadyMember ? 'cursor-default border-border bg-muted/45 opacity-70' : checked ? 'border-[#a9d04e] bg-[#f1f7e8]' : 'border-border hover:bg-muted/40'}`}><span className={`grid size-5 place-items-center rounded-md border ${alreadyMember ? 'border-[#a9d04e] bg-[#edf4e1] text-[#52751d]' : checked ? 'border-[#86b31f] bg-[#9fcf2d] text-[#10253d]' : 'border-border bg-card'}`}>{(checked || alreadyMember) && <Check className="size-3" />}</span><span className="grid size-8 place-items-center rounded-lg bg-[#eef2f5] text-[10px] font-bold text-[#29445e]">{initials(athlete.firstName, athlete.lastName)}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{athlete.firstName} {athlete.lastName}</span><span className="block truncate text-[11px] text-muted-foreground">{athlete.primaryPosition ?? 'Sin posición'} · {athlete.email}</span></span>{alreadyMember && <span className="text-[10px] font-semibold text-[#52751d]">Ya pertenece</span>}</button>; })}</div><div className="mt-5 flex items-center justify-between border-t border-border pt-4"><p className="text-xs text-muted-foreground">{selectedAthletes.length} nuevas seleccionadas</p><button onClick={addMembers} disabled={saving || selectedAthletes.length === 0} className="flex h-9 items-center gap-2 rounded-xl bg-[#10253d] px-4 text-xs font-semibold text-white disabled:opacity-50">{saving ? <LoaderCircle className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />} Agregar al grupo</button></div></Modal>}
     </div>
@@ -185,5 +197,5 @@ function GroupIcon({ type, inverse = false }: { type: Group['organizationType'];
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block space-y-1.5"><span className="text-xs font-semibold">{label}</span>{children}</label>; }
 function Loading() { return <div className="grid min-h-52 place-items-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>; }
 function EmptyGroups({ onCreate }: { onCreate: () => void }) { return <div className="px-5 py-12 text-center"><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-muted text-muted-foreground"><UsersRound className="size-5" /></span><p className="mt-4 text-sm font-semibold">Todavía no hay grupos</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Creá el primer plantel para empezar a organizar personas.</p><button onClick={onCreate} className="mt-4 text-xs font-semibold text-[#52751d] hover:underline">Crear primer grupo</button></div>; }
-function sportLabel(sport: Group['sport']) { return sport === 'beach_handball' ? 'Beach handball' : sport === 'handball_indoor' ? 'Handball indoor' : 'General'; }
+function sportLabel(sport: Group['sport']) { return sport === 'beach_handball' ? 'Beach handball' : sport === 'handball_indoor' ? 'Handball indoor' : sport === 'general' ? 'General' : sport; }
 function initials(firstName: string, lastName: string) { return `${firstName[0] ?? ''}${lastName[0] ?? ''}`.toUpperCase(); }

@@ -500,7 +500,7 @@ function normalizeRows(value: unknown, weekCount: number) {
           typeof record.id === 'string' || typeof record.id === 'number'
             ? record.id
             : index + 1,
-        block: cleanText(record.block, 12) || 'A',
+        block: cleanText(record.block, 80) || 'A',
         category: cleanText(record.category, 40) || 'Trabajo',
         name: cleanText(record.name, 180),
         values: normalizeWeekValues(record.values, weekCount),

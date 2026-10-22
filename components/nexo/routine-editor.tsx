@@ -35,13 +35,14 @@ import {
 } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
+import { nextBlockName, validateBlockName } from '@/lib/routine-blocks';
 import {
   DEFAULT_TRAINING_DAYS,
   WEEKDAYS,
   weekdayLabel,
 } from '@/lib/routine-schedule';
 
-type Category = 'Fuerza' | 'Potencia' | 'Velocidad' | 'Control';
+type Category = string;
 type ExerciseRow = {
   id: number | string;
   block: string;
@@ -211,28 +212,20 @@ const initialSessions: TrainingSession[] = [
   {
     id: 'day-a',
     weekday: 1,
-    name: 'Día A · Full body',
-    warmup: 'Movilidad, core y preventivos de hombro antes de comenzar.',
-    instructions:
-      'Priorizar la calidad técnica. Ajustar la carga si aparece molestia.',
-    rows: cloneRows(initialRows, 'a'),
+    name: 'Día A',
+    warmup: '',
+    instructions: '',
+    rows: [],
   },
   {
     id: 'day-b',
     weekday: 4,
-    name: 'Día B · Full body',
-    warmup: 'Movilidad, core y preventivos de hombro antes de comenzar.',
-    instructions:
-      'Priorizar la calidad técnica. Ajustar la carga si aparece molestia.',
-    rows: cloneRows(initialRows, 'b'),
+    name: 'Día B',
+    warmup: '',
+    instructions: '',
+    rows: [],
   },
 ];
-const blockDescriptions: Record<string, string> = {
-  A: 'Activación neural y potencia',
-  B: 'Fuerza de tren inferior',
-  C: 'Fuerza de tren superior',
-  D: 'Trabajo unilateral y estabilidad',
-};
 
 export function RoutineEditor() {
   const [routineId, setRoutineId] = useState('');
@@ -241,7 +234,8 @@ export function RoutineEditor() {
   const [description, setDescription] = useState('');
   const [sessions, setSessions] = useState(initialSessions);
   const [activeSession, setActiveSession] = useState(0);
-  const [weekPlans, setWeekPlans] = useState(initialWeeks);
+  const [weekPlans, setWeekPlans] = useState(initialWeeks.map(week => ({ ...week, objective: '', secondary: '' })));
+  const [newBlockName, setNewBlockName] = useState('');
   const [activeWeek, setActiveWeek] = useState(0);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -395,7 +389,7 @@ export function RoutineEditor() {
     const newRow: ExerciseRow = {
       id: crypto.randomUUID(),
       block,
-      category: 'Fuerza',
+      category: 'Trabajo',
       name: 'Nuevo ejercicio',
       values: Array.from({ length: weekPlans.length }, () => ''),
       rir: Array.from({ length: weekPlans.length }, () => ''),
@@ -408,6 +402,17 @@ export function RoutineEditor() {
       ),
     );
     markDirty();
+  }
+
+  function addBlock() {
+    try {
+      const name = validateBlockName(newBlockName || nextBlockName(blocks), blocks);
+      addExercise(name);
+      setNewBlockName('');
+      setError('');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'No se pudo crear el bloque.');
+    }
   }
 
   function removeExercise(id: number | string) {
@@ -502,6 +507,8 @@ export function RoutineEditor() {
     setError('');
     setNotice('');
     try {
+      const emptyDay = sessions.find(session => !session.rows.some(row => row.name.trim()));
+      if (emptyDay) throw new Error(`Agregá al menos un ejercicio en ${emptyDay.name} antes de guardar.`);
       const response = await fetch('/api/routines', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -896,6 +903,12 @@ export function RoutineEditor() {
             </Badge>
           </div>
 
+          <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-dashed border-border bg-card p-4">
+            <label className="min-w-48 flex-1 text-sm font-semibold">Nombre del nuevo bloque
+              <input value={newBlockName} onChange={event => setNewBlockName(event.target.value)} maxLength={80} placeholder={`Ej.: ${nextBlockName(blocks)}, entrada en calor, resistencia…`} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 font-normal" />
+            </label>
+            <Button type="button" onClick={addBlock}><Plus /> Crear bloque</Button>
+          </section>
           {blocks.length === 0 && (
             <section className="rounded-[22px] border border-dashed border-border bg-card p-8 text-center">
               <p className="font-semibold">
@@ -904,9 +917,9 @@ export function RoutineEditor() {
               <Button
                 variant="outline"
                 className="mt-4"
-                onClick={() => addExercise('A')}
+                onClick={addBlock}
               >
-                <Plus /> Agregar primer ejercicio
+                <Plus /> Crear primer bloque
               </Button>
             </section>
           )}
@@ -920,13 +933,13 @@ export function RoutineEditor() {
                 className="overflow-hidden rounded-[22px] border border-border bg-card shadow-[0_16px_45px_-40px_#10253d]"
               >
                 <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-3.5 sm:px-5">
-                  <span className="grid size-9 place-items-center rounded-xl bg-[#10253d] font-bold text-white">
-                    {block}
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#10253d] font-bold text-white">
+                    {blocks.indexOf(block) + 1}
                   </span>
                   <div className="flex-1">
                     <h2 className="text-base font-bold">Bloque {block}</h2>
                     <p className="text-sm text-muted-foreground">
-                      {blockDescriptions[block] ?? 'Trabajo específico'}
+                      Ejercicios de esta sesión
                     </p>
                   </div>
                   <Badge variant="outline" className="bg-card">
@@ -955,9 +968,11 @@ export function RoutineEditor() {
                             aria-label={`Nombre del ejercicio ${index + 1} del bloque ${block}`}
                             className="w-full bg-transparent text-base font-semibold outline-none focus:text-[#29445e]"
                           />
-                          <select
+                          <input
                             aria-label={`Categoría de ${row.name}`}
                             value={row.category}
+                            maxLength={40}
+                            placeholder="Categoría libre"
                             onChange={(event) =>
                               updateExercise(
                                 row.id,
@@ -966,18 +981,7 @@ export function RoutineEditor() {
                               )
                             }
                             className={`mt-2 rounded-full border px-2 py-1 text-xs font-semibold outline-none ${categoryTone(row.category)}`}
-                          >
-                            {(
-                              [
-                                'Fuerza',
-                                'Potencia',
-                                'Velocidad',
-                                'Control',
-                              ] as Category[]
-                            ).map((category) => (
-                              <option key={category}>{category}</option>
-                            ))}
-                          </select>
+                          />
                         </div>
                       </div>
                       <LabeledInput

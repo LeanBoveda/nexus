@@ -55,7 +55,7 @@ export function LoginForm({ setupRequired, emailEnabled = false }: { setupRequir
         <div className="relative my-auto max-w-md pb-16">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#dcefaa]"><Sparkles className="size-3" /> Todo el rendimiento, conectado</span>
           <h1 className="mt-6 text-4xl font-bold leading-[1.08] tracking-[-0.055em]">Decisiones más claras para cada deportista.</h1>
-          <p className="mt-5 text-sm leading-7 text-white/60">Planificá, asigná y evaluá equipos de handball desde un mismo lugar, conservando la flexibilidad de tus planillas.</p>
+          <p className="mt-5 text-sm leading-7 text-white/60">Planificá, asigná y evaluá deportistas de cualquier disciplina desde un mismo lugar.</p>
           <div className="mt-9 space-y-4">
             {['Rutinas por grupo con ajustes individuales', 'Evaluaciones históricas y porcentajes de mejora', 'Seguimiento de carga, bienestar y cumplimiento'].map((item) => (
               <div key={item} className="flex items-center gap-3 text-sm text-white/78"><CheckCircle2 className="size-4 text-[#c8f15a]" />{item}</div>
