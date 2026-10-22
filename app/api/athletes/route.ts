@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     WHERE a.status != 'archived' AND a.trainer_account_id = ?
     GROUP BY a.id, a.first_name, a.last_name, a.email, a.primary_position,
       a.phone, a.birth_date, a.country_code, a.primary_context, a.status, a.created_at
-    ORDER BY a.last_name, a.first_name LIMIT 500`,
+    ORDER BY a.last_name, a.first_name`,
     )
     .bind(user.trainerAccountId)
     .all();

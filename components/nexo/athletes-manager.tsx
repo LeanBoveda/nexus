@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AthleteImportDialog } from '@/components/nexo/athlete-import-dialog';
 import {
   NativeSelect,
   NativeSelectOption,
@@ -276,6 +277,10 @@ export function AthletesManager() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <AthleteImportDialog groups={groups} onImported={(count, skipped) => {
+            setNotice(`Se importaron ${count} alumnos.${skipped ? ` Se omitieron ${skipped} filas.` : ''}`);
+            void loadData();
+          }} />
           <Button
             onClick={openCreate}
             className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
