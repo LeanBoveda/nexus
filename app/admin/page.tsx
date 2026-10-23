@@ -5,5 +5,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function AdminPage() {
   const user = await requirePlatformAdmin();
-  return <BusinessAdmin userName={user.name} />;
+  return (
+    <BusinessAdmin
+      userName={user.name}
+      showDemo={user.email.trim().toLowerCase() === 'leandroboveda@gmail.com'}
+    />
+  );
 }

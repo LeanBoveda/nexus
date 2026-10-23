@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { AdminDemo } from '@/components/nexo/admin-demo';
 
 type Account = {
   id: string;
@@ -93,7 +94,13 @@ const emptyForm: FormState = {
   notes: '',
 };
 
-export function BusinessAdmin({ userName }: { userName: string }) {
+export function BusinessAdmin({
+  userName,
+  showDemo = false,
+}: {
+  userName: string;
+  showDemo?: boolean;
+}) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -333,6 +340,7 @@ export function BusinessAdmin({ userName }: { userName: string }) {
           </div>
         </div>
 
+        {showDemo && <AdminDemo />}
         {notice ? (
           <div
             className={`mt-5 rounded-2xl border px-4 py-3 text-sm ${notice.tone === 'ok' ? 'border-[#c9dd9c] bg-[#f3f9e8] text-[#416118]' : 'border-[#f1bbb0] bg-[#fff2ef] text-[#a23d2e]'}`}
