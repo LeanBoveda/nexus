@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function LoginPage() {
   const user = await getSession();
-  if (user) redirect(user.isPlatformAdmin ? '/admin' : user.role === 'athlete' ? '/mi-entrenamiento' : '/');
+  if (user) redirect(user.isPlatformAdmin ? '/admin' : user.role === 'athlete' ? user.athleteId ? '/mi-entrenamiento' : '/mis-profesores' : '/');
   const { setupRequired } = await getAuthStatus();
   return <LoginForm setupRequired={setupRequired} emailEnabled={await emailReady()} />;
 }

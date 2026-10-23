@@ -8,6 +8,7 @@ import {
   CalendarClock,
   CircleDollarSign,
   Plus,
+  Mail,
   RefreshCw,
   ShieldCheck,
   Users,
@@ -68,7 +69,6 @@ type FormState = {
   businessName: string;
   ownerName: string;
   email: string;
-  password: string;
   plan: Account['plan'];
   subscriptionStatus: Account['subscriptionStatus'];
   accessStatus: Account['accessStatus'];
@@ -83,7 +83,6 @@ const emptyForm: FormState = {
   businessName: '',
   ownerName: '',
   email: '',
-  password: '',
   plan: 'starter',
   subscriptionStatus: 'trialing',
   accessStatus: 'active',
@@ -106,6 +105,32 @@ export function BusinessAdmin({ userName }: { userName: string }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editAccount, setEditAccount] = useState<Account | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [emailHealth, setEmailHealth] = useState<{
+    configured: boolean;
+    events: {
+      id: string;
+      status: string;
+      errorCode: string | null;
+      createdAt: number;
+    }[];
+    failures: { count: number; lastFailureAt: number | null } | null;
+  } | null>(null);
+  const [emailError, setEmailError] = useState('');
+  const [sendingAccess, setSendingAccess] = useState(false);
+  const [accessNotice, setAccessNotice] = useState('');
+
+  const loadEmailHealth = useCallback(async () => {
+    try {
+      const response = await fetch('/api/admin/email', { cache: 'no-store' });
+      if (!response.ok) throw new Error('No pudimos consultar los envíos.');
+      setEmailHealth(await response.json());
+      setEmailError('');
+    } catch {
+      setEmailError(
+        'No pudimos consultar el estado del correo. Actualizá para reintentar.',
+      );
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,12 +147,13 @@ export function BusinessAdmin({ userName }: { userName: string }) {
         throw new Error(body.error || 'No pudimos cargar el negocio.');
       setAccounts(body.accounts ?? []);
       setSummary(body.summary ?? null);
+      await loadEmailHealth();
     } catch (error) {
       setNotice({ tone: 'error', text: messageOf(error) });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadEmailHealth]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -138,10 +164,10 @@ export function BusinessAdmin({ userName }: { userName: string }) {
     setForm({
       ...emptyForm,
       periodEndsOn: futureDate(14),
-      password: temporaryPassword(),
     });
     setCreateOpen(true);
     setNotice(null);
+    setAccessNotice('');
   }
 
   function openEdit(account: Account) {
@@ -149,7 +175,6 @@ export function BusinessAdmin({ userName }: { userName: string }) {
       businessName: account.businessName,
       ownerName: account.ownerName ?? '',
       email: account.contactEmail,
-      password: '',
       plan: account.plan,
       subscriptionStatus: account.subscriptionStatus,
       accessStatus: account.accessStatus,
@@ -163,6 +188,7 @@ export function BusinessAdmin({ userName }: { userName: string }) {
     });
     setEditAccount(account);
     setNotice(null);
+    setAccessNotice('');
   }
 
   async function createAccount() {
@@ -179,13 +205,35 @@ export function BusinessAdmin({ userName }: { userName: string }) {
       setCreateOpen(false);
       setNotice({
         tone: 'ok',
-        text: `Cuenta creada. Compartí con ${form.ownerName}: ${form.email} y la clave temporal ${form.password}`,
+        text: `Cuenta creada para ${form.email}. El PF ya puede solicitar su enlace en el login. Abrí su cuenta para enviarle un acceso.`,
       });
       await load();
     } catch (error) {
       setNotice({ tone: 'error', text: messageOf(error) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendAccess() {
+    if (!editAccount) return;
+    setSendingAccess(true);
+    setAccessNotice('');
+    try {
+      const response = await fetch('/api/admin/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: editAccount.contactEmail }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(body.error || 'No pudimos enviar el enlace.');
+      setAccessNotice('Enlace enviado. El PF tiene 15 minutos para usarlo.');
+    } catch (error) {
+      setAccessNotice(messageOf(error));
+    } finally {
+      setSendingAccess(false);
+      await loadEmailHealth();
     }
   }
 
@@ -240,7 +288,12 @@ export function BusinessAdmin({ userName }: { userName: string }) {
               Administrador del sistema
             </p>
           </div>
-          <a href="/api/admin/email/connect" className="rounded-lg border border-white/20 px-3 py-2 text-xs hover:bg-white/10">Conectar Gmail</a>
+          <a
+            href="/api/admin/email/connect"
+            className="rounded-lg border border-white/20 px-3 py-2 text-xs hover:bg-white/10"
+          >
+            Conectar Gmail
+          </a>
           <ShieldCheck className="size-5 text-[#c8f15a]" />
         </div>
       </header>
@@ -321,6 +374,61 @@ export function BusinessAdmin({ userName }: { userName: string }) {
             warning={Boolean(summary?.pastDue)}
           />
         </div>
+
+        <section
+          className="mt-6 rounded-2xl border border-[#dbe2df] bg-white p-5"
+          aria-label="Operación de correo"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold">Accesos por email</h2>
+              <p className="mt-1 text-sm text-[#64717d]">
+                {emailError ||
+                  (emailHealth
+                    ? emailHealth.configured
+                      ? 'Gmail conectado. La conexión configurada no confirma la entrega de próximos correos.'
+                      : 'Gmail pendiente de conexión.'
+                    : 'Consultando conexión…')}
+              </p>
+              {emailHealth ? (
+                <p className="mt-1 text-xs text-[#64717d]">
+                  {emailHealth.failures?.count ?? 0} envíos fallidos en las
+                  últimas 24 horas. Último fallo:{' '}
+                  {shortDate(emailHealth.failures?.lastFailureAt ?? null)}.
+                </p>
+              ) : null}
+            </div>
+            <a
+              href="/api/admin/email/connect"
+              className="text-sm font-semibold text-[#597523]"
+            >
+              Conectar o renovar Gmail →
+            </a>
+          </div>
+          {emailHealth?.events.length ? (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer font-semibold">
+                Últimos {emailHealth.events.length} intentos de envío
+              </summary>
+              <ul className="mt-2 space-y-1 text-[#64717d]">
+                {emailHealth.events.map((event) => (
+                  <li key={event.id}>
+                    {new Date(event.createdAt).toLocaleString('es-AR', {
+                      timeZone: 'America/Argentina/Buenos_Aires',
+                    })}{' '}
+                    ·{' '}
+                    {event.status === 'sent' ? 'Aceptado por Gmail' : 'Fallido'}
+                    {event.errorCode ? ` · ${event.errorCode}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : (
+            <p className="mt-3 text-xs text-[#64717d]">
+              Todavía no hay intentos de envío registrados.
+            </p>
+          )}
+        </section>
 
         <div className="mt-6 overflow-hidden rounded-3xl border border-[#dbe2df] bg-white shadow-[0_24px_60px_-50px_#10253d]">
           <div className="flex items-center justify-between border-b border-[#e5e9e7] px-5 py-4 sm:px-6">
@@ -419,7 +527,7 @@ export function BusinessAdmin({ userName }: { userName: string }) {
         open={createOpen}
         onOpenChange={setCreateOpen}
         title="Dar de alta un PF"
-        description="Creá su espacio aislado y sus credenciales iniciales."
+        description="Creá su espacio y habilitá el ingreso por enlace al email."
         form={form}
         setForm={setForm}
         saving={saving}
@@ -435,6 +543,14 @@ export function BusinessAdmin({ userName }: { userName: string }) {
         setForm={setForm}
         saving={saving}
         onSave={() => void updateAccount()}
+        accessEmail={editAccount?.contactEmail}
+        canSendAccess={
+          editAccount?.accessStatus === 'active' &&
+          editAccount?.ownerStatus === 'active'
+        }
+        sendingAccess={sendingAccess}
+        accessNotice={accessNotice}
+        onSendAccess={() => void sendAccess()}
       />
     </main>
   );
@@ -450,6 +566,11 @@ function AccountDialog({
   saving,
   createMode = false,
   onSave,
+  accessEmail,
+  canSendAccess,
+  sendingAccess,
+  accessNotice,
+  onSendAccess,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -460,6 +581,11 @@ function AccountDialog({
   saving: boolean;
   createMode?: boolean;
   onSave: () => void;
+  accessEmail?: string;
+  canSendAccess?: boolean;
+  sendingAccess?: boolean;
+  accessNotice?: string;
+  onSendAccess?: () => void;
 }) {
   const field = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm({ ...form, [key]: value });
@@ -497,12 +623,9 @@ function AccountDialog({
                   placeholder="pf@ejemplo.com"
                 />
               </Field>
-              <Field label="Clave temporal">
-                <Input
-                  value={form.password}
-                  onChange={(event) => field('password', event.target.value)}
-                />
-              </Field>
+              <p className="self-end text-xs text-muted-foreground">
+                El PF ingresa con un enlace de un solo uso recibido en su email.
+              </p>
             </>
           ) : null}
           <Field label="Plan">
@@ -598,6 +721,32 @@ function AccountDialog({
             </div>
           ) : null}
         </div>
+        {!createMode && accessEmail ? (
+          <div className="rounded-xl border p-4 text-sm">
+            <p className="font-semibold">Acceso del PF</p>
+            <p className="mt-1 break-all text-muted-foreground">
+              {accessEmail}
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3"
+              disabled={!canSendAccess || sendingAccess || saving}
+              onClick={onSendAccess}
+            >
+              <Mail className="size-4" />{' '}
+              {sendingAccess ? 'Enviando…' : 'Enviar enlace de acceso'}
+            </Button>
+            {!canSendAccess ? (
+              <p className="mt-2 text-xs">
+                Guardá la cuenta con acceso activo para habilitar el envío.
+              </p>
+            ) : null}
+            {accessNotice ? (
+              <output className="mt-2 block text-xs">{accessNotice}</output>
+            ) : null}
+          </div>
+        ) : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
@@ -789,13 +938,6 @@ function timestampToInput(value: number | null) {
 }
 function futureDate(days: number) {
   return timestampToInput(Date.now() + days * 86_400_000);
-}
-function temporaryPassword() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!';
-  return Array.from(
-    crypto.getRandomValues(new Uint8Array(14)),
-    (byte) => alphabet[byte % alphabet.length],
-  ).join('');
 }
 function messageOf(error: unknown) {
   return error instanceof Error

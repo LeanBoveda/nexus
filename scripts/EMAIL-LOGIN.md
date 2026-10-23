@@ -24,10 +24,14 @@ Email links expire in 15 minutes. The secret is in the URL fragment, removed fro
 browser history on the confirmation page, and redeemed only on an explicit POST.
 Only token hashes are stored. Redemption uses a conditional SQL UPDATE RETURNING.
 Account, tenant, athlete status, and email ownership are checked again at redemption.
-No general public registration: existing users and uniquely matched active athlete
-records are eligible. The explicitly designated admin email can bootstrap its own
-platform-only identity after proving mailbox access. Duplicate athlete emails need
-manual resolution; no cross-tenant identity is selected arbitrarily.
+No general public registration: existing users and matching active athlete records
+are eligible. The explicitly designated admin email can bootstrap its own
+platform-only identity after proving mailbox access. A verified athlete email can
+link multiple profiles across trainers; the athlete chooses a trainer in
+`/mis-profesores`, and data remains isolated by profile. A coach-generated invitation
+is restricted to its individual athlete profile and cannot unlock other trainers.
+Changing an athlete email revokes that profile's contextual access without disabling
+the shared identity or the athlete's profiles with other trainers.
 
 Tests: `node scripts/test-email-login.mjs` (fresh in-memory SQLite, mocked Gmail).
 Also run TypeScript and production build. End-to-end delivery needs the human-owned

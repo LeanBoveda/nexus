@@ -4,6 +4,8 @@ import {
   daysUntilWeekday,
   scheduleDate,
   weekdayLabel,
+  calendarWeek,
+  validDateKey,
 } from '@/lib/routine-schedule';
 
 export type PortalExercise = {
@@ -32,6 +34,9 @@ export type PortalEvaluation = {
 };
 
 export type AthletePortalData = {
+  dateKey?: string;
+  todayKey?: string;
+  availableRoutines?: Array<{ instanceId: string; name: string }>;
   athlete: {
     id: string;
     firstName: string;
@@ -49,6 +54,10 @@ export type AthletePortalData = {
     warmup: string;
     instructions: string;
     sessionKey: string;
+    sessionId: string;
+    legacySessionKey: string;
+    legacySessionKeys: string[];
+    startsOn: string;
     scheduledToday: boolean;
     todayLabel: string;
     targetPse: number;
@@ -83,6 +92,7 @@ export type AthletePortalData = {
 
 export async function getAthletePortalData(
   athleteId: string,
+  options: { dateKey?: string; instanceId?: string } = {},
 ): Promise<AthletePortalData | null> {
   const db = getD1();
   const athlete = await db
@@ -110,22 +120,42 @@ export async function getAthletePortalData(
     }>();
   if (!athlete) return null;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const todayKey = scheduleDate().dateKey;
+  const today =
+    validDateKey(options.dateKey) && options.dateKey <= todayKey
+      ? options.dateKey
+      : todayKey;
+  const available = await db
+    .prepare(`SELECT ari.id AS instanceId, r.name FROM athlete_routine_instances ari
+    JOIN routine_assignments ra ON ra.id = ari.assignment_id
+    JOIN routine_versions rv ON rv.id = ra.routine_version_id JOIN routines r ON r.id = rv.routine_id
+    WHERE ari.athlete_id = ? AND (ari.status IN ('scheduled', 'active', 'completed')
+      OR (ari.status = 'cancelled' AND ? < COALESCE(ari.ended_on, ?)))
+    AND ra.starts_on <= ? AND (ra.ends_on IS NULL OR ra.ends_on >= ?)
+    ORDER BY ra.starts_on DESC, ari.created_at DESC`)
+    .bind(athleteId, today, todayKey, today, today)
+    .all<{ instanceId: string; name: string }>();
+  const selectedId =
+    available.results.find((item) => item.instanceId === options.instanceId)
+      ?.instanceId ??
+    available.results[0]?.instanceId ??
+    '';
   const instance = await db
     .prepare(
       `SELECT ari.id AS instanceId, ari.overrides, ari.status,
-      r.name, r.description, rv.content
+      r.name, r.description, rv.content, ra.starts_on AS startsOn
       FROM athlete_routine_instances ari
       JOIN routine_assignments ra ON ra.id = ari.assignment_id
       JOIN routine_versions rv ON rv.id = ra.routine_version_id
       JOIN routines r ON r.id = rv.routine_id
       WHERE ari.athlete_id = ?
-        AND ari.status IN ('scheduled', 'active')
+        AND ari.id = ? AND (ari.status IN ('scheduled', 'active', 'completed')
+          OR (ari.status = 'cancelled' AND ? < COALESCE(ari.ended_on, ?)))
         AND ra.starts_on <= ? AND (ra.ends_on IS NULL OR ra.ends_on >= ?)
       ORDER BY CASE ari.status WHEN 'active' THEN 0 ELSE 1 END,
         ra.starts_on DESC, ari.created_at DESC LIMIT 1`,
     )
-    .bind(athleteId, today, today)
+    .bind(athleteId, selectedId, today, todayKey, today, today)
     .first<{
       instanceId: string;
       overrides: unknown;
@@ -133,18 +163,25 @@ export async function getAthletePortalData(
       name: string;
       description: string | null;
       content: unknown;
+      startsOn: string;
     }>();
 
-  const routine = instance ? parseRoutine(instance) : null;
+  const routine = instance ? resolveRoutineSession(instance, today) : null;
   const [currentLog, completedLogs, evaluationRows] = await Promise.all([
     routine?.scheduledToday
       ? db
           .prepare(
             `SELECT completed_at AS completedAt, pse, pain, notes, actual_values AS actualValues
-            FROM workout_logs WHERE instance_id = ? AND athlete_id = ? AND session_key = ?
-            ORDER BY created_at DESC LIMIT 1`,
+            FROM workout_logs WHERE instance_id = ? AND athlete_id = ? AND (session_key = ? OR (entry_key IS NULL AND session_key IN (?, ?)))
+            ORDER BY (entry_key IS NOT NULL) DESC, created_at DESC LIMIT 1`,
           )
-          .bind(routine.instanceId, athleteId, routine.sessionKey)
+          .bind(
+            routine.instanceId,
+            athleteId,
+            routine.sessionKey,
+            routine.legacySessionKey,
+            routine.legacySessionKeys[1] ?? routine.legacySessionKey,
+          )
           .first<{
             completedAt: number | null;
             pse: number | null;
@@ -155,21 +192,27 @@ export async function getAthletePortalData(
       : Promise.resolve(null),
     db
       .prepare(
-        `SELECT completed_at AS completedAt FROM workout_logs
-        WHERE athlete_id = ? AND completed_at IS NOT NULL
-        ORDER BY completed_at DESC LIMIT 200`,
+        `SELECT completed_at AS completedAt, trained_on AS trainedOn, instance_id AS instanceId, session_key AS sessionKey, entry_key AS entryKey, actual_values AS actualValues FROM workout_logs
+        WHERE athlete_id = ? ORDER BY (entry_key IS NOT NULL) DESC, created_at DESC`,
       )
       .bind(athleteId)
-      .all<{ completedAt: number }>(),
+      .all<{
+        completedAt: number | null;
+        trainedOn: string | null;
+        instanceId: string;
+        sessionKey: string;
+        entryKey: string | null;
+        actualValues: unknown;
+      }>(),
     db
       .prepare(
         `SELECT em.id AS metricId, em.label, em.unit,
         em.better_direction AS betterDirection, er.value,
-        es.evaluated_at AS evaluatedAt
+        es.evaluated_at AS evaluatedAt, es.surface
         FROM evaluation_results er
         JOIN evaluation_sessions es ON es.id = er.session_id
         JOIN evaluation_metrics em ON em.id = er.metric_id
-        WHERE es.athlete_id = ?
+        WHERE es.athlete_id = ? AND es.archived_at IS NULL
         ORDER BY es.evaluated_at DESC LIMIT 100`,
       )
       .bind(athleteId)
@@ -180,20 +223,50 @@ export async function getAthletePortalData(
         betterDirection: 'higher' | 'lower' | 'neutral';
         value: number;
         evaluatedAt: number;
+        surface: string;
       }>(),
   ]);
 
   const actualValues = asRecord(currentLog?.actualValues);
   const completedExerciseIds = Array.isArray(actualValues.completedExerciseIds)
-    ? actualValues.completedExerciseIds.map(String)
+    ? [...new Set(actualValues.completedExerciseIds.map(String))].filter((id) =>
+        routine?.exercises.some((exercise) => exercise.id === id),
+      )
     : [];
-  const completedDates = completedLogs.results.map((row) => row.completedAt);
-  const weekStart = Date.parse(`${scheduleDate().weekKey}T00:00:00-03:00`);
+  const seen = new Set<string>();
+  const completedDates = completedLogs.results
+    .filter((row) => {
+      // New records shadow their original legacy key, including when completion was undone.
+      const key = `${row.instanceId}:${row.sessionKey}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      const values = asRecord(row.actualValues);
+      const legacyKeys = Array.isArray(values.legacySessionKeys)
+        ? values.legacySessionKeys
+        : [values.legacySessionKey];
+      if (row.entryKey)
+        for (const legacyKey of legacyKeys)
+          if (typeof legacyKey === 'string')
+            seen.add(`${row.instanceId}:${legacyKey}`);
+      return row.completedAt !== null;
+    })
+    .map((row) =>
+      row.trainedOn
+        ? Date.parse(`${row.trainedOn}T12:00:00-03:00`)
+        : row.completedAt!,
+    );
+  const weekStart = Date.parse(
+    `${scheduleDate(new Date(`${today}T12:00:00Z`)).weekKey}T00:00:00-03:00`,
+  );
   const weeklySessions = completedDates.filter(
-    (timestamp) => timestamp >= weekStart,
+    (timestamp) =>
+      timestamp >= weekStart && timestamp < weekStart + 7 * 86400000,
   ).length;
 
   return {
+    dateKey: today,
+    todayKey,
+    availableRoutines: available.results,
     athlete: {
       id: athlete.id,
       firstName: athlete.firstName,
@@ -218,13 +291,17 @@ export async function getAthletePortalData(
   };
 }
 
-function parseRoutine(instance: {
-  instanceId: string;
-  name: string;
-  description: string | null;
-  content: unknown;
-  overrides: unknown;
-}) {
+export function resolveRoutineSession(
+  instance: {
+    instanceId: string;
+    name: string;
+    description: string | null;
+    content: unknown;
+    overrides: unknown;
+    startsOn: string;
+  },
+  dateKey = scheduleDate().dateKey,
+) {
   const content = {
     ...asRecord(instance.content),
     ...asRecord(instance.overrides),
@@ -232,13 +309,9 @@ function parseRoutine(instance: {
   const weekPlans = Array.isArray(content.weekPlans)
     ? content.weekPlans.map(asRecord)
     : [];
-  const activeWeek = clampInteger(
-    content.activeWeek,
-    0,
-    Math.max(0, weekPlans.length - 1),
-  );
+  const activeWeek = calendarWeek(instance.startsOn, dateKey, weekPlans.length);
   const activePlan = weekPlans[activeWeek] ?? {};
-  const schedule = scheduleDate();
+  const schedule = scheduleDate(new Date(`${dateKey}T12:00:00Z`));
   const sessions = routineSessions(content);
   const selectedSession = sessions.find(
     (session) => session.weekday === schedule.weekday,
@@ -249,13 +322,25 @@ function parseRoutine(instance: {
       daysAway: daysUntilWeekday(schedule.weekday, session.weekday),
     }))
     .sort((left, right) => left.daysAway - right.daysAway)[0];
-  const sessionKey = selectedSession
+  const legacySessionKey = selectedSession
     ? `week-${schedule.weekKey}-cycle-${textValue(activePlan.number) || activeWeek + 1}-session-${selectedSession.id}`
+    : '';
+  const oldWeek = clampInteger(
+    content.activeWeek,
+    0,
+    Math.max(0, weekPlans.length - 1),
+  );
+  const oldLegacySessionKey = selectedSession
+    ? `week-${schedule.weekKey}-cycle-${textValue(weekPlans[oldWeek]?.number) || oldWeek + 1}-session-${selectedSession.id}`
     : '';
   const targetPse = clampInteger(activePlan.pse ?? content.targetPse, 0, 10, 5);
   const rows = selectedSession?.rows ?? [];
 
   return {
+    startsOn: instance.startsOn,
+    sessionId: selectedSession?.id ?? '',
+    legacySessionKey,
+    legacySessionKeys: [legacySessionKey, oldLegacySessionKey],
     instanceId: instance.instanceId,
     name: instance.name,
     description: instance.description ?? '',
@@ -266,7 +351,9 @@ function parseRoutine(instance: {
         'Realizá la entrada en calor indicada por tu preparador físico.'
       : '',
     instructions: selectedSession?.instructions ?? '',
-    sessionKey,
+    sessionKey: selectedSession
+      ? `date-${dateKey}-session-${selectedSession.id}`
+      : '',
     scheduledToday: Boolean(selectedSession),
     todayLabel: weekdayLabel(schedule.weekday),
     targetPse,
@@ -362,13 +449,15 @@ function evaluationSummary(
     betterDirection: 'higher' | 'lower' | 'neutral';
     value: number;
     evaluatedAt: number;
+    surface: string;
   }>,
 ): PortalEvaluation[] {
   const grouped = new Map<string, typeof rows>();
   for (const row of rows) {
-    const values = grouped.get(row.metricId) ?? [];
+    const comparisonKey = `${row.metricId}:${row.surface}`;
+    const values = grouped.get(comparisonKey) ?? [];
     values.push(row);
-    grouped.set(row.metricId, values);
+    grouped.set(comparisonKey, values);
   }
   return [...grouped.values()].slice(0, 4).map(([latest, previous]) => {
     let change = 0;
@@ -378,7 +467,7 @@ function evaluationSummary(
       change = latest.betterDirection === 'lower' ? -raw : raw;
     }
     return {
-      label: latest.label,
+      label: `${latest.label}${latest.surface ? ` · ${latest.surface}` : ''}`,
       value: `${formatNumber(latest.value)}${latest.unit ? ` ${latest.unit}` : ''}`,
       change: Math.round(change * 10) / 10,
       positive: change >= 0,
@@ -398,11 +487,9 @@ function weeklyStreak(timestamps: number[]) {
 }
 
 function startOfWeek(timestamp: number) {
-  const date = new Date(timestamp);
-  const day = (date.getUTCDay() + 6) % 7;
-  date.setUTCHours(0, 0, 0, 0);
-  date.setUTCDate(date.getUTCDate() - day);
-  return date.getTime();
+  return Date.parse(
+    `${scheduleDate(new Date(timestamp)).weekKey}T00:00:00-03:00`,
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

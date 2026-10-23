@@ -59,3 +59,26 @@ export function daysUntilWeekday(fromWeekday: number, targetWeekday: number) {
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
+
+export function validDateKey(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    Number.isFinite(Date.parse(`${value}T12:00:00Z`)) &&
+    new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value
+  );
+}
+
+export function calendarWeek(startsOn: string, dateKey: string, count: number) {
+  const days = Math.floor(
+    (Date.parse(`${dateKey}T12:00:00Z`) - Date.parse(`${startsOn}T12:00:00Z`)) /
+      86400000,
+  );
+  return Math.max(0, Math.min(Math.max(0, count - 1), Math.floor(days / 7)));
+}
+
+/** An assignment remains available through the day the PF cancels it. */
+export function cancellationEndsOn(now = new Date()) {
+  const today = scheduleDate(now).dateKey;
+  return new Date(Date.parse(`${today}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
+}

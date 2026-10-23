@@ -27,6 +27,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getD1 } from '@/db';
 import { requireSession } from '@/lib/auth';
 import { getAthletePortalData } from '@/lib/athlete-portal';
+import {
+  canonicalTrainingLogs,
+  trainingLogDate,
+  addTrainingDays,
+  type TrainingLog,
+  type AssignedTraining,
+} from '@/lib/training-overview';
+import { scheduleDate } from '@/lib/routine-schedule';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,34 +78,37 @@ export default async function AthleteProfilePage({
     .first<AthleteRow>();
   if (!athlete) notFound();
 
-  const [portal, history, routineRows, pseRow, latestEvaluation] =
-    await Promise.all([
-      athlete.status === 'active'
-        ? getAthletePortalData(id)
-        : Promise.resolve(null),
-      db
-        .prepare(
-          `SELECT wl.completed_at AS completedAt, wl.pse, wl.pain, wl.notes,
-        r.name AS routineName
+  const [portal, logRows, routineRows, latestEvaluation] = await Promise.all([
+    athlete.status === 'active'
+      ? getAthletePortalData(id)
+      : Promise.resolve(null),
+    db
+      .prepare(
+        `SELECT wl.id, wl.instance_id AS instanceId, wl.athlete_id AS athleteId,
+        wl.session_key AS sessionKey, wl.entry_key AS entryKey, wl.trained_on AS trainedOn,
+        wl.completed_at AS completedAt, wl.pse, wl.pain, wl.notes,
+        wl.actual_values AS actualValues, wl.created_at AS createdAt, wl.updated_at AS updatedAt,
+        r.name AS routineName, r.description, rv.content, ari.overrides,
+        ra.starts_on AS startsOn, ra.ends_on AS endsOn
         FROM workout_logs wl
         JOIN athlete_routine_instances ari ON ari.id = wl.instance_id
         JOIN routine_assignments ra ON ra.id = ari.assignment_id
         JOIN routine_versions rv ON rv.id = ra.routine_version_id
         JOIN routines r ON r.id = rv.routine_id
-        WHERE wl.athlete_id = ?
-        ORDER BY COALESCE(wl.completed_at, wl.created_at) DESC LIMIT 30`,
-        )
-        .bind(id)
-        .all<{
-          completedAt: number | null;
-          pse: number | null;
-          pain: number | null;
-          notes: string | null;
-          routineName: string;
-        }>(),
-      db
-        .prepare(
-          `SELECT DISTINCT r.id, r.name, r.description, ari.status,
+        WHERE wl.athlete_id = ? AND r.trainer_account_id = ?
+        ORDER BY wl.created_at DESC`,
+      )
+      .bind(id, user.trainerAccountId)
+      .all<
+        TrainingLog &
+          Pick<
+            AssignedTraining,
+            'content' | 'overrides' | 'startsOn' | 'endsOn' | 'description'
+          > & { routineName: string }
+      >(),
+    db
+      .prepare(
+        `SELECT DISTINCT r.id, r.name, r.description, ari.status,
         ra.starts_on AS startsOn, ra.ends_on AS endsOn
         FROM athlete_routine_instances ari
         JOIN routine_assignments ra ON ra.id = ari.assignment_id
@@ -105,33 +116,60 @@ export default async function AthleteProfilePage({
         JOIN routines r ON r.id = rv.routine_id
         WHERE ari.athlete_id = ? AND r.status != 'archived'
         ORDER BY ari.created_at DESC`,
-        )
-        .bind(id)
-        .all<{
-          id: string;
-          name: string;
-          description: string | null;
-          status: string;
-          startsOn: string;
-          endsOn: string | null;
-        }>(),
-      db
-        .prepare(
-          `SELECT AVG(pse) AS average FROM workout_logs
-        WHERE athlete_id = ?
-          AND completed_at >= (unixepoch() * 1000 - ?)
-          AND pse IS NOT NULL`,
-        )
-        .bind(id, 28 * 24 * 60 * 60 * 1000)
-        .first<{ average: number | null }>(),
-      db
-        .prepare(
-          `SELECT evaluated_at AS evaluatedAt FROM evaluation_sessions
-        WHERE athlete_id = ? ORDER BY evaluated_at DESC LIMIT 1`,
-        )
-        .bind(id)
-        .first<{ evaluatedAt: number }>(),
-    ]);
+      )
+      .bind(id)
+      .all<{
+        id: string;
+        name: string;
+        description: string | null;
+        status: string;
+        startsOn: string;
+        endsOn: string | null;
+      }>(),
+    db
+      .prepare(
+        `SELECT evaluated_at AS evaluatedAt FROM evaluation_sessions
+        WHERE athlete_id = ? AND archived_at IS NULL ORDER BY evaluated_at DESC LIMIT 1`,
+      )
+      .bind(id)
+      .first<{ evaluatedAt: number }>(),
+  ]);
+
+  const byId = new Map(logRows.results.map((row) => [row.id, row]));
+  const canonical = canonicalTrainingLogs(logRows.results)
+    .map((log) => {
+      const row = byId.get(log.id)!;
+      const date = trainingLogDate(log, {
+        ...row,
+        name: row.routineName,
+        firstName: athlete.firstName,
+        lastName: athlete.lastName,
+        groups: '',
+      });
+      return { ...row, date };
+    })
+    .sort(
+      (a, b) =>
+        b.date.localeCompare(a.date) ||
+        (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
+    );
+  const history = { results: canonical.slice(0, 30) };
+  const today = scheduleDate().dateKey;
+  const firstDay = addTrainingDays(today, -27);
+  const recentPse = canonical
+    .filter(
+      (row) =>
+        row.completedAt !== null &&
+        row.pse !== null &&
+        row.date >= firstDay &&
+        row.date <= today,
+    )
+    .map((row) => row.pse!);
+  const pseRow = {
+    average: recentPse.length
+      ? recentPse.reduce((sum, value) => sum + value, 0) / recentPse.length
+      : null,
+  };
 
   const name = `${athlete.firstName} ${athlete.lastName}`;
   const groups = athlete.groupNames.split('|||').filter(Boolean);
@@ -436,9 +474,9 @@ export default async function AthleteProfilePage({
             <Card className="border-none bg-card ring-1 ring-border">
               <CardContent className="space-y-3">
                 {history.results.length > 0 ? (
-                  history.results.map((entry, index) => (
+                  history.results.map((entry) => (
                     <div
-                      key={`${entry.completedAt}-${index}`}
+                      key={entry.id}
                       className="flex items-start gap-3 rounded-2xl border border-border p-4"
                     >
                       <span className="grid size-9 place-items-center rounded-xl bg-muted">
@@ -447,8 +485,9 @@ export default async function AthleteProfilePage({
                       <div className="flex-1">
                         <p className="font-semibold">{entry.routineName}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {entry.completedAt
-                            ? fullDate(entry.completedAt)
+                          {dateLabel(entry.date)} ·{' '}
+                          {entry.completedAt !== null
+                            ? 'Completada'
                             : 'Sesión guardada'}{' '}
                           · PSE {entry.pse ?? '—'} · Dolor {entry.pain ?? '—'}
                         </p>
@@ -538,13 +577,6 @@ function shortDate(timestamp: number) {
   return new Intl.DateTimeFormat('es-AR', {
     day: '2-digit',
     month: 'short',
-  }).format(new Date(timestamp));
-}
-function fullDate(timestamp: number) {
-  return new Intl.DateTimeFormat('es-AR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Argentina/Buenos_Aires',
   }).format(new Date(timestamp));
 }
 function dateLabel(value: string) {

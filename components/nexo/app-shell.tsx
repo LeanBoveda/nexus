@@ -1,6 +1,8 @@
 /* eslint-disable next/no-html-link-for-pages -- Vinext's current Link runtime breaks production navigation; native links keep every section reliable. */
 import {
   ChevronDown,
+  CalendarDays,
+  Activity,
   ClipboardCheck,
   Dumbbell,
   LayoutDashboard,
@@ -24,6 +26,8 @@ export type NexoSection =
   | 'deportistas'
   | 'grupos'
   | 'rutinas'
+  | 'agenda'
+  | 'carga'
   | 'evaluaciones';
 
 const navigation: Array<{
@@ -41,6 +45,8 @@ const navigation: Array<{
   },
   { id: 'grupos', label: 'Grupos', href: '/grupos', icon: UsersRound },
   { id: 'rutinas', label: 'Rutinas', href: '/rutinas', icon: Dumbbell },
+  { id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarDays },
+  { id: 'carga', label: 'Carga', href: '/carga', icon: Activity },
   {
     id: 'evaluaciones',
     label: 'Evaluaciones',
@@ -204,7 +210,7 @@ export async function AppShell({
 
       <nav
         aria-label="Navegación móvil"
-        className="fixed inset-x-3 bottom-3 z-40 grid grid-cols-5 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden"
+        className="fixed inset-x-3 bottom-3 z-40 flex overflow-x-auto rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-xl lg:hidden [&>a]:min-w-16 [&>a]:flex-1"
       >
         {navigation.map((item) => (
           <a

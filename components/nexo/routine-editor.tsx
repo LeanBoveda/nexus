@@ -36,6 +36,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { nextBlockName, validateBlockName } from '@/lib/routine-blocks';
+import { RoutineAttachments } from '@/components/nexo/routine-attachments';
 import {
   DEFAULT_TRAINING_DAYS,
   WEEKDAYS,
@@ -234,7 +235,9 @@ export function RoutineEditor() {
   const [description, setDescription] = useState('');
   const [sessions, setSessions] = useState(initialSessions);
   const [activeSession, setActiveSession] = useState(0);
-  const [weekPlans, setWeekPlans] = useState(initialWeeks.map(week => ({ ...week, objective: '', secondary: '' })));
+  const [weekPlans, setWeekPlans] = useState(
+    initialWeeks.map((week) => ({ ...week, objective: '', secondary: '' })),
+  );
   const [newBlockName, setNewBlockName] = useState('');
   const [activeWeek, setActiveWeek] = useState(0);
   const [saved, setSaved] = useState(false);
@@ -406,12 +409,19 @@ export function RoutineEditor() {
 
   function addBlock() {
     try {
-      const name = validateBlockName(newBlockName || nextBlockName(blocks), blocks);
+      const name = validateBlockName(
+        newBlockName || nextBlockName(blocks),
+        blocks,
+      );
       addExercise(name);
       setNewBlockName('');
       setError('');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No se pudo crear el bloque.');
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'No se pudo crear el bloque.',
+      );
     }
   }
 
@@ -507,8 +517,13 @@ export function RoutineEditor() {
     setError('');
     setNotice('');
     try {
-      const emptyDay = sessions.find(session => !session.rows.some(row => row.name.trim()));
-      if (emptyDay) throw new Error(`Agregá al menos un ejercicio en ${emptyDay.name} antes de guardar.`);
+      const emptyDay = sessions.find(
+        (session) => !session.rows.some((row) => row.name.trim()),
+      );
+      if (emptyDay)
+        throw new Error(
+          `Agregá al menos un ejercicio en ${emptyDay.name} antes de guardar.`,
+        );
       const response = await fetch('/api/routines', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -536,7 +551,11 @@ export function RoutineEditor() {
       setRoutineId(result.routineId);
       setVersionNumber(result.versionNumber ?? versionNumber + 1);
       setSaved(true);
-      setNotice('La planificación semanal quedó guardada.');
+      setNotice(
+        routineId
+          ? 'Nueva versión guardada. Las asignaciones anteriores conservan su versión; usá Asignar rutina para entregar la nueva.'
+          : 'La planificación semanal quedó guardada.',
+      );
       window.history.replaceState(
         null,
         '',
@@ -904,21 +923,26 @@ export function RoutineEditor() {
           </div>
 
           <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-dashed border-border bg-card p-4">
-            <label className="min-w-48 flex-1 text-sm font-semibold">Nombre del nuevo bloque
-              <input value={newBlockName} onChange={event => setNewBlockName(event.target.value)} maxLength={80} placeholder={`Ej.: ${nextBlockName(blocks)}, entrada en calor, resistencia…`} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 font-normal" />
+            <label className="min-w-48 flex-1 text-sm font-semibold">
+              Nombre del nuevo bloque
+              <input
+                value={newBlockName}
+                onChange={(event) => setNewBlockName(event.target.value)}
+                maxLength={80}
+                placeholder={`Ej.: ${nextBlockName(blocks)}, entrada en calor, resistencia…`}
+                className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 font-normal"
+              />
             </label>
-            <Button type="button" onClick={addBlock}><Plus /> Crear bloque</Button>
+            <Button type="button" onClick={addBlock}>
+              <Plus /> Crear bloque
+            </Button>
           </section>
           {blocks.length === 0 && (
             <section className="rounded-[22px] border border-dashed border-border bg-card p-8 text-center">
               <p className="font-semibold">
                 Este día todavía no tiene ejercicios.
               </p>
-              <Button
-                variant="outline"
-                className="mt-4"
-                onClick={addBlock}
-              >
+              <Button variant="outline" className="mt-4" onClick={addBlock}>
                 <Plus /> Crear primer bloque
               </Button>
             </section>
@@ -1026,6 +1050,14 @@ export function RoutineEditor() {
         </main>
 
         <aside className="space-y-4 xl:sticky xl:top-[88px]">
+          {routineId ? (
+            <RoutineAttachments routineId={routineId} />
+          ) : (
+            <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+              Guardá la rutina para adjuntar su Excel, PDF u otros archivos de
+              apoyo.
+            </p>
+          )}
           <section className="rounded-[22px] border border-border bg-card p-5 shadow-[0_18px_50px_-42px_#10253d]">
             <div className="flex items-center justify-between">
               <div>

@@ -1,5 +1,7 @@
 import { getD1 } from '@/db';
 import { getStaffSessionFromRequest, isSameOrigin } from '@/lib/auth';
+import { groupMembershipStatements } from '@/lib/group-memberships';
+import { cancellationEndsOn } from '@/lib/routine-schedule';
 
 export const runtime = 'edge';
 
@@ -20,8 +22,7 @@ export async function GET(request: Request) {
   if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const db = getD1();
-  const [groupResult, athleteResult, membershipResult] = await Promise.all([
-    db
+  const groupQuery = db
       .prepare(`SELECT g.id, g.name, g.sport, g.season, g.active,
       o.id AS organizationId, o.name AS organizationName, o.type AS organizationType,
       COUNT(CASE WHEN gm.athlete_id IS NOT NULL AND gm.ended_at IS NULL THEN 1 END) AS memberCount
@@ -32,7 +33,13 @@ export async function GET(request: Request) {
       GROUP BY g.id, g.name, g.sport, g.season, g.active, o.id, o.name, o.type
       ORDER BY o.name, g.name`)
       .bind(user.trainerAccountId)
-      .all(),
+      .all();
+  if (new URL(request.url).searchParams.get('groupsOnly') === '1') {
+    const groupResult = await groupQuery;
+    return Response.json({ groups: groupResult.results });
+  }
+  const [groupResult, athleteResult, membershipResult] = await Promise.all([
+    groupQuery,
     db
       .prepare(`SELECT id, first_name AS firstName, last_name AS lastName, email,
       primary_position AS primaryPosition, status
@@ -75,13 +82,20 @@ export async function POST(request: Request) {
     if (input.action === 'create') {
       const groupName = input.groupName?.trim();
       const organizationName = input.organizationName?.trim();
-      const organizationType = typeof input.organizationType === 'string' ? input.organizationType.trim() : '';
+      const organizationType =
+        typeof input.organizationType === 'string'
+          ? input.organizationType.trim()
+          : '';
       const sport = typeof input.sport === 'string' ? input.sport.trim() : '';
       if (
         !groupName ||
         !organizationName ||
-        !organizationType || organizationType.length > 100 ||
-        !sport || sport.length > 100 || groupName.length > 140 || organizationName.length > 140
+        !organizationType ||
+        organizationType.length > 100 ||
+        !sport ||
+        sport.length > 100 ||
+        groupName.length > 140 ||
+        organizationName.length > 140
       ) {
         return Response.json(
           { error: 'Completá los datos del grupo.' },
@@ -168,48 +182,17 @@ export async function POST(request: Request) {
           { error: 'El grupo o algún deportista no está disponible.' },
           { status: 404 },
         );
-      const assignments = await db
-        .prepare(
-          `SELECT ra.id, ra.starts_on AS startsOn
-          FROM routine_assignments ra
-          JOIN routine_versions rv ON rv.id = ra.routine_version_id
-          JOIN routines r ON r.id = rv.routine_id
-          WHERE ra.target_type = 'group' AND ra.target_id = ?
-            AND r.status = 'published'
-            AND (ra.ends_on IS NULL OR ra.ends_on >= date('now'))`,
-        )
-        .bind(input.groupId)
-        .all<{ id: string; startsOn: string }>();
       const now = Date.now();
-      const today = new Date().toISOString().slice(0, 10);
-      await db.batch([
-        ...athleteIds.map((athleteId) =>
-          db
-            .prepare(`INSERT INTO group_memberships
-        (athlete_id, group_id, role, joined_at, ended_at) VALUES (?, ?, NULL, ?, NULL)
-        ON CONFLICT(athlete_id, group_id) DO UPDATE SET ended_at = NULL`)
-            .bind(athleteId, input.groupId, now),
+      await db.batch(
+        athleteIds.flatMap((athleteId) =>
+          groupMembershipStatements(db, {
+            athleteId,
+            groupId: input.groupId!,
+            trainerAccountId: user.trainerAccountId!,
+            now,
+          }),
         ),
-        ...assignments.results.flatMap((assignment) =>
-          athleteIds.map((athleteId) =>
-            db
-              .prepare(
-                `INSERT INTO athlete_routine_instances
-                (id, assignment_id, athlete_id, overrides, status, created_at)
-                VALUES (?, ?, ?, NULL, ?, ?)
-                ON CONFLICT(assignment_id, athlete_id) DO UPDATE SET
-                  status = excluded.status`,
-              )
-              .bind(
-                crypto.randomUUID(),
-                assignment.id,
-                athleteId,
-                assignment.startsOn <= today ? 'active' : 'scheduled',
-                now,
-              ),
-          ),
-        ),
-      ]);
+      );
       return Response.json({ ok: true });
     }
 
@@ -245,14 +228,14 @@ export async function POST(request: Request) {
           .bind(Date.now(), input.groupId, input.athleteId),
         db
           .prepare(
-            `UPDATE athlete_routine_instances SET status = 'cancelled'
-            WHERE athlete_id = ? AND status IN ('scheduled', 'active')
+            `UPDATE athlete_routine_instances SET status = 'cancelled', ended_on = ?
+            WHERE athlete_id = ? AND status IN ('scheduled', 'active', 'completed')
               AND assignment_id IN (
                 SELECT id FROM routine_assignments
                 WHERE target_type = 'group' AND target_id = ?
               )`,
           )
-          .bind(input.athleteId, input.groupId),
+          .bind(cancellationEndsOn(), input.athleteId, input.groupId),
       ]);
       return Response.json({ ok: true });
     }
@@ -273,13 +256,13 @@ export async function POST(request: Request) {
           .bind(input.groupId),
         db
           .prepare(
-            `UPDATE athlete_routine_instances SET status = 'cancelled'
-            WHERE status IN ('scheduled', 'active') AND assignment_id IN (
+            `UPDATE athlete_routine_instances SET status = 'cancelled', ended_on = ?
+            WHERE status IN ('scheduled', 'active', 'completed') AND assignment_id IN (
               SELECT id FROM routine_assignments
               WHERE target_type = 'group' AND target_id = ?
             )`,
           )
-          .bind(input.groupId),
+          .bind(cancellationEndsOn(), input.groupId),
       ]);
       return Response.json({ ok: true });
     }

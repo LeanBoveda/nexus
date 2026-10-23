@@ -25,6 +25,8 @@ import {
 import { getD1 } from '@/db';
 import { requireSession } from '@/lib/auth';
 import { cn } from '@/lib/utils';
+import { getTrainingOverview, addTrainingDays } from '@/lib/training-overview';
+import { scheduleDate } from '@/lib/routine-schedule';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,10 +36,10 @@ export default async function Home() {
   const user = await requireSession();
   const db = getD1();
   const trainerAccountId = user.trainerAccountId ?? '';
+  const dateKey = scheduleDate().dateKey;
   const monthAgo = 30 * 24 * 60 * 60 * 1000;
-  const fortnight = 14 * 24 * 60 * 60 * 1000;
-  const [athletes, groups, routines, evaluations, weeklyLogs, attention] =
-    await Promise.all([
+  const [athletes, groups, routines, evaluations, training] = await Promise.all(
+    [
       db
         .prepare(
           "SELECT COUNT(*) AS count FROM athletes WHERE status = 'active' AND trainer_account_id = ?",
@@ -57,40 +59,43 @@ export default async function Home() {
         .first<CountRow>(),
       db
         .prepare(`SELECT COUNT(*) AS count FROM evaluation_sessions es JOIN athletes a ON a.id = es.athlete_id
-      WHERE es.evaluated_at >= (unixepoch() * 1000 - ?) AND a.trainer_account_id = ?`)
+      WHERE es.archived_at IS NULL AND es.evaluated_at >= (unixepoch() * 1000 - ?) AND a.trainer_account_id = ?`)
         .bind(monthAgo, trainerAccountId)
         .first<CountRow>(),
-      db
-        .prepare(`SELECT COUNT(*) AS count FROM workout_logs wl JOIN athletes a ON a.id = wl.athlete_id
-      WHERE wl.completed_at >= (unixepoch() * 1000 - 7 * 24 * 60 * 60 * 1000)
-        AND a.trainer_account_id = ?`)
-        .bind(trainerAccountId)
-        .first<CountRow>(),
-      db
-        .prepare(`SELECT a.id, a.first_name AS firstName, a.last_name AS lastName,
-      wl.pse, wl.pain, wl.notes, wl.completed_at AS completedAt, r.name AS routineName
-      FROM workout_logs wl
-      JOIN athletes a ON a.id = wl.athlete_id
-      JOIN athlete_routine_instances ari ON ari.id = wl.instance_id
-      JOIN routine_assignments ra ON ra.id = ari.assignment_id
-      JOIN routine_versions rv ON rv.id = ra.routine_version_id
-      JOIN routines r ON r.id = rv.routine_id
-      WHERE wl.completed_at >= (unixepoch() * 1000 - ?)
-        AND a.trainer_account_id = ?
-        AND (wl.pain >= 4 OR wl.pse >= 8)
-      ORDER BY wl.completed_at DESC LIMIT 8`)
-        .bind(fortnight, trainerAccountId)
-        .all<{
-          id: string;
-          firstName: string;
-          lastName: string;
-          pse: number | null;
-          pain: number | null;
-          notes: string | null;
-          completedAt: number;
-          routineName: string;
-        }>(),
-    ]);
+      getTrainingOverview(
+        trainerAccountId,
+        addTrainingDays(dateKey, -29),
+        dateKey,
+      ),
+    ],
+  );
+  const weeklyLogs = {
+    count: training.entries.filter(
+      (entry) =>
+        entry.completedAt && entry.date >= addTrainingDays(dateKey, -6),
+    ).length,
+  };
+  const attention = {
+    results: training.entries
+      .filter(
+        (entry) =>
+          entry.completedAt &&
+          entry.date >= addTrainingDays(dateKey, -13) &&
+          ((entry.pain ?? 0) >= 4 || (entry.pse ?? 0) >= 8),
+      )
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8)
+      .map((entry) => ({
+        id: entry.athleteId,
+        firstName: entry.assignment.firstName,
+        lastName: entry.assignment.lastName,
+        pse: entry.pse,
+        pain: entry.pain,
+        notes: entry.notes,
+        completedAt: entry.completedAt!,
+        routineName: entry.assignment.name,
+      })),
+  };
 
   return (
     <AppShell active="inicio">

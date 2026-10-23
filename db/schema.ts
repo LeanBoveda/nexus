@@ -108,7 +108,10 @@ export const athletes = sqliteTable(
     createdAt,
   },
   (table) => [
-    uniqueIndex('athletes_email_unique').on(table.email),
+    uniqueIndex('athletes_account_email_unique').on(
+      table.trainerAccountId,
+      sql`lower(trim(${table.email}))`,
+    ),
     index('athletes_status_idx').on(table.status),
   ],
 );
@@ -214,6 +217,7 @@ export const athleteRoutineInstances = sqliteTable(
     overrides: text('overrides', { mode: 'json' }).$type<
       Record<string, unknown>
     >(),
+    endedOn: text('ended_on'),
     status: text('status', {
       enum: ['scheduled', 'active', 'completed', 'cancelled'],
     })
@@ -241,6 +245,9 @@ export const workoutLogs = sqliteTable(
       .notNull()
       .references(() => athletes.id, { onDelete: 'cascade' }),
     sessionKey: text('session_key').notNull(),
+    entryKey: text('entry_key'),
+    trainedOn: text('trained_on'),
+    updatedAt: integer('updated_at'),
     completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
     pse: real('pse'),
     pain: real('pain'),
@@ -251,6 +258,7 @@ export const workoutLogs = sqliteTable(
     createdAt,
   },
   (table) => [
+    uniqueIndex('workout_logs_entry_key_unique').on(table.entryKey),
     index('workout_logs_athlete_date_idx').on(
       table.athleteId,
       table.completedAt,
@@ -265,9 +273,8 @@ export const evaluationTemplates = sqliteTable('evaluation_templates', {
     { onDelete: 'cascade' },
   ),
   name: text('name').notNull(),
-  sport: text('sport', {
-    enum: ['handball_indoor', 'beach_handball', 'general'],
-  }).notNull(),
+  sport: text('sport').notNull(),
+  archivedAt: integer('archived_at'),
   description: text('description'),
   createdBy: text('created_by').notNull(),
   createdAt,
@@ -288,6 +295,7 @@ export const evaluationMetrics = sqliteTable(
     }).notNull(),
     protocol: text('protocol'),
     sortOrder: integer('sort_order').notNull().default(0),
+    archivedAt: integer('archived_at'),
   },
   (table) => [
     uniqueIndex('evaluation_metrics_key_unique').on(
@@ -311,9 +319,8 @@ export const evaluationSessions = sqliteTable(
       onDelete: 'set null',
     }),
     evaluatedAt: integer('evaluated_at', { mode: 'timestamp_ms' }).notNull(),
-    surface: text('surface', {
-      enum: ['indoor', 'sand', 'gym', 'other'],
-    }).notNull(),
+    surface: text('surface').notNull(),
+    archivedAt: integer('archived_at'),
     notes: text('notes'),
     createdAt,
   },
@@ -395,6 +402,12 @@ export const authSessions = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    activeAthleteId: text('active_athlete_id').references(() => athletes.id, {
+      onDelete: 'set null',
+    }),
+    scopedAthleteId: text('scoped_athlete_id').references(() => athletes.id, {
+      onDelete: 'cascade',
+    }),
     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
     createdAt,
     lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
@@ -403,6 +416,45 @@ export const authSessions = sqliteTable(
     index('auth_sessions_user_idx').on(table.userId),
     index('auth_sessions_expiry_idx').on(table.expiresAt),
   ],
+);
+
+export const athleteIdentities = sqliteTable(
+  'athlete_identities',
+  {
+    athleteId: text('athlete_id')
+      .primaryKey()
+      .references(() => athletes.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt,
+  },
+  (table) => [index('athlete_identities_user_idx').on(table.userId)],
+);
+
+export const emailDeliveryEvents = sqliteTable(
+  'email_delivery_events',
+  {
+    id: text('id').primaryKey(),
+    recipientHash: text('recipient_hash').notNull(),
+    status: text('status').notNull(),
+    errorCode: text('error_code'),
+    createdAt,
+  },
+  (table) => [index('email_delivery_events_created_idx').on(table.createdAt)],
+);
+
+export const routineFiles = sqliteTable(
+  'routine_files',
+  {
+    routineId: text('routine_id')
+      .notNull()
+      .references(() => routines.id, { onDelete: 'cascade' }),
+    fileId: text('file_id')
+      .notNull()
+      .references(() => files.id, { onDelete: 'cascade' }),
+  },
+  (table) => [primaryKey({ columns: [table.routineId, table.fileId] })],
 );
 
 export const athleteAccessLinks = sqliteTable(
@@ -442,13 +494,17 @@ export const emailIntegration = sqliteTable('email_integration', {
   updatedAt: integer('updated_at').notNull(),
 });
 
-export const emailTokens = sqliteTable('email_tokens', {
-  tokenHash: text('token_hash').primaryKey(),
-  kind: text('kind').notNull(),
-  subject: text('subject').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  usedAt: integer('used_at'),
-}, (table) => [index('email_tokens_expiry_idx').on(table.expiresAt)]);
+export const emailTokens = sqliteTable(
+  'email_tokens',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    kind: text('kind').notNull(),
+    subject: text('subject').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    usedAt: integer('used_at'),
+  },
+  (table) => [index('email_tokens_expiry_idx').on(table.expiresAt)],
+);
 
 export const emailRateLimits = sqliteTable('email_rate_limits', {
   key: text('key').primaryKey(),

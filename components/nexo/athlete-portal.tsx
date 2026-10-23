@@ -39,6 +39,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { RoutineAttachments } from '@/components/nexo/routine-attachments';
 
 type Section = 'today' | 'plan' | 'progress' | 'profile';
 
@@ -91,6 +92,7 @@ export function AthletePortal({
           body: JSON.stringify({
             instanceId: routine.instanceId,
             sessionKey: routine.sessionKey,
+            dateKey: data.dateKey,
             completedExerciseIds: [...completedIds],
             pse,
             pain,
@@ -149,7 +151,9 @@ export function AthletePortal({
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#72808c]">
                 Mi espacio
               </p>
-              <p className="mt-0.5 text-sm font-semibold">{formatLongDate()}</p>
+              <p className="mt-0.5 text-sm font-semibold">
+                {formatLongDate(data.dateKey)}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               {preview && (
@@ -168,6 +172,54 @@ export function AthletePortal({
           </header>
 
           <div className="px-4 pb-4 md:px-0 md:pt-5">
+            {!preview && (
+              <form
+                action="/mi-entrenamiento"
+                className="mb-4 flex flex-wrap items-end gap-3 rounded-2xl bg-white p-4"
+              >
+                <label className="grid gap-1 text-sm font-semibold">
+                  Fecha del entrenamiento
+                  <input
+                    aria-label="Fecha del entrenamiento"
+                    type="date"
+                    name="date"
+                    defaultValue={data.dateKey}
+                    max={data.todayKey}
+                    className="rounded-lg border p-2"
+                    required
+                  />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold">
+                  Plan asignado
+                  <select
+                    name="instance"
+                    defaultValue={routine?.instanceId}
+                    className="max-w-64 rounded-lg border p-2"
+                  >
+                    {data.availableRoutines?.map((item) => (
+                      <option key={item.instanceId} value={item.instanceId}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button type="submit" variant="outline">
+                  Ver fecha
+                </Button>
+                <a
+                  href="/mis-profesores"
+                  className="p-2 text-sm font-semibold underline"
+                >
+                  Mis profesores
+                </a>
+                {data.dateKey !== data.todayKey && (
+                  <p className="w-full text-sm text-muted-foreground">
+                    Estás consultando un entrenamiento anterior. Podés registrar
+                    o corregir su progreso.
+                  </p>
+                )}
+              </form>
+            )}
             {notice && (
               <output className="mb-4 flex items-center gap-2 rounded-2xl border border-[#cfe0ac] bg-[#f1f7e8] px-4 py-3 text-sm font-semibold text-[#426414]">
                 <CheckCircle2 className="size-4" />
@@ -293,6 +345,7 @@ function TodayView({
   const routine = data.routine;
   return (
     <div className="space-y-4">
+      {routine && <RoutineAttachments instanceId={routine.instanceId} readOnly />}
       <section className="overflow-hidden rounded-[28px] bg-[#10253d] p-5 text-white shadow-[0_24px_70px_-45px_#10253d] sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -301,8 +354,10 @@ function TodayView({
             </p>
             <h1 className="mt-1 text-[28px] font-bold leading-tight tracking-[-0.05em] sm:text-3xl">
               {routine && !routine.scheduledToday
-                ? 'Hoy toca recuperar'
-                : 'Tu entrenamiento de hoy'}
+                ? 'Día de recuperación'
+                : data.dateKey && data.dateKey !== data.todayKey
+                  ? 'Tu entrenamiento de esa fecha'
+                  : 'Tu entrenamiento de hoy'}
             </h1>
           </div>
           <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-[#c8f15a]">
@@ -571,7 +626,7 @@ function PlanView({ data }: { data: AthletePortalData }) {
                     </p>
                     {session.isToday && (
                       <Badge className="border-0 bg-[#10253d] text-[#c8f15a]">
-                        Hoy
+                        Día elegido
                       </Badge>
                     )}
                   </div>
@@ -602,15 +657,14 @@ function PlanView({ data }: { data: AthletePortalData }) {
                           : 'bg-[#eef1ec] text-[#758078]',
                     )}
                   >
-                    {week.status === 'completed' ? (
-                      <Check className="size-5" />
-                    ) : (
-                      week.number
-                    )}
+                    {week.number}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="font-bold">Semana {week.number}</h3>
+                      {week.status === 'completed' && (
+                        <Badge variant="outline">Transcurrida</Badge>
+                      )}
                       <Badge variant="outline" className="bg-white/60">
                         {week.phase}
                       </Badge>
@@ -673,7 +727,7 @@ function ProgressView({ data }: { data: AthletePortalData }) {
             {data.progress.streak}
           </p>
           <p className="mt-1 text-sm text-[#71808b]">
-            semanas cumpliendo el plan
+            semanas con actividad registrada
           </p>
         </section>
       </div>
@@ -1047,10 +1101,11 @@ function pseLabel(value: number) {
   return 'Máximo';
 }
 
-function formatLongDate() {
+function formatLongDate(dateKey?: string) {
   return new Intl.DateTimeFormat('es-AR', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
-  }).format(new Date());
+    timeZone: 'America/Argentina/Buenos_Aires',
+  }).format(dateKey ? new Date(`${dateKey}T12:00:00Z`) : new Date());
 }

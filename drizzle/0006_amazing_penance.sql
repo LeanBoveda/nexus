@@ -1,0 +1,1 @@
+ALTER TABLE `athlete_routine_instances` ADD `ended_on` text;

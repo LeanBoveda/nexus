@@ -1,5 +1,6 @@
 import { getD1 } from '@/db';
 import { getStaffSessionFromRequest, isSameOrigin } from '@/lib/auth';
+import { cancellationEndsOn } from '@/lib/routine-schedule';
 
 export const runtime = 'edge';
 
@@ -229,25 +230,18 @@ export async function POST(request: Request) {
             Date.now(),
           ),
       );
-      if (input.routineId) {
-        statements.push(
-          db
-            .prepare(
-              `UPDATE routine_assignments SET routine_version_id = ?
-              WHERE id IN (
-                SELECT ra.id FROM routine_assignments ra
-                JOIN routine_versions previous ON previous.id = ra.routine_version_id
-                WHERE previous.routine_id = ?
-                  AND (ra.ends_on IS NULL OR ra.ends_on >= date('now'))
-              )`,
-            )
-            .bind(versionId, routineId),
-        );
-      }
+      // Assignments retain their version so historical dates and corrections
+      // always resolve the exercise definitions originally assigned.
       await db.batch(statements);
 
       return Response.json(
-        { ok: true, routineId, versionId, versionNumber: nextVersion },
+        {
+          ok: true,
+          routineId,
+          versionId,
+          versionNumber: nextVersion,
+          existingAssignmentsPreserved: Boolean(input.routineId),
+        },
         { status: input.routineId ? 200 : 201 },
       );
     }
@@ -308,6 +302,11 @@ export async function POST(request: Request) {
       const assignmentId = crypto.randomUUID();
       const now = Date.now();
       await db.batch([
+        db.prepare(`UPDATE routine_assignments SET ends_on = date(?, '-1 day')
+          WHERE target_type = ? AND target_id = ? AND starts_on < ?
+            AND (ends_on IS NULL OR ends_on >= ?)
+            AND routine_version_id IN (SELECT id FROM routine_versions WHERE routine_id = ?)`)
+          .bind(input.startsOn, input.targetType, input.targetId, input.startsOn, input.startsOn, input.routineId),
         db
           .prepare(
             `INSERT INTO routine_assignments
@@ -362,14 +361,14 @@ export async function POST(request: Request) {
           .bind(input.routineId, user.trainerAccountId),
         db
           .prepare(
-            `UPDATE athlete_routine_instances SET status = 'cancelled'
+            `UPDATE athlete_routine_instances SET status = 'cancelled', ended_on = ?
             WHERE assignment_id IN (
               SELECT ra.id FROM routine_assignments ra
               JOIN routine_versions rv ON rv.id = ra.routine_version_id
               WHERE rv.routine_id = ?
-            ) AND status IN ('scheduled', 'active')`,
+            ) AND status IN ('scheduled', 'active', 'completed')`,
           )
-          .bind(input.routineId),
+          .bind(cancellationEndsOn(), input.routineId),
       ]);
       return Response.json({ ok: true });
     }

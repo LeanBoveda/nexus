@@ -17,12 +17,15 @@ globalThis.__emailTestEnv = { DB: { prepare: wrap, batch: async statements => Pr
 function moduleUrl(source) { return `data:text/javascript;base64,${Buffer.from(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64')}`; }
 const securityUrl = moduleUrl(await readFile(new URL('../lib/email-security.ts', import.meta.url), 'utf8'));
 const security = await import(securityUrl);
+const identitiesUrl = moduleUrl((await readFile(new URL('../lib/athlete-identities.ts', import.meta.url), 'utf8'))
+  .replace("import { env } from 'cloudflare:workers';", 'const env = globalThis.__emailTestEnv;'));
 const authUrl = moduleUrl(`export class AuthError extends Error { constructor(message, status=400) { super(message); this.status=status; } }
 export async function createSession(id) { return 'test-session-' + id; }
 export function sessionCookie(token) { return 'nexo_session=' + token; }`);
 const loginUrl = moduleUrl((await readFile(new URL('../lib/email-login.ts', import.meta.url), 'utf8'))
   .replace("import { env } from 'cloudflare:workers';", 'const env = globalThis.__emailTestEnv;')
-  .replace("'@/lib/auth'", JSON.stringify(authUrl)).replace("'@/lib/email-security'", JSON.stringify(securityUrl)));
+  .replace("'@/lib/auth'", JSON.stringify(authUrl)).replace("'@/lib/email-security'", JSON.stringify(securityUrl))
+  .replace("'@/lib/athlete-identities'", JSON.stringify(identitiesUrl)));
 const login = await import(loginUrl);
 const api = await import(moduleUrl((await readFile(new URL('../app/api/auth/email/route.ts', import.meta.url), 'utf8'))
   .replace("'@/lib/auth'", JSON.stringify(authUrl)).replace("'@/lib/email-login'", JSON.stringify(loginUrl))));
@@ -68,6 +71,33 @@ db.prepare("UPDATE trainer_accounts SET access_status = 'active' WHERE id = 't1'
 db.prepare(`INSERT INTO athletes (id,trainer_account_id,first_name,last_name,email) VALUES ('a1','t1','Ana','Test','ana@example.com')`).run();
 await login.requestEmailLogin('ana@example.com', 'athlete-ip');
 assert.equal((await login.redeemEmailLogin(deliveries.at(-1))).destination, '/mi-entrenamiento');
+db.prepare(`INSERT INTO trainer_accounts (id,business_name,slug,contact_email) VALUES ('t2','Segundo PF','fixture2','pf2@example.com')`).run();
+db.prepare(`INSERT INTO athletes (id,trainer_account_id,first_name,last_name,email) VALUES ('a2','t2','Ana','Otro PF','ana@example.com')`).run();
+await login.requestEmailLogin('ana@example.com', 'athlete-ip2');
+assert.equal((await login.redeemEmailLogin(deliveries.at(-1))).destination, '/mis-profesores');
+const athleteIdentity = db.prepare("SELECT id FROM users WHERE email='ana@example.com'").get().id;
+assert.equal(db.prepare('SELECT COUNT(*) AS count FROM athlete_identities WHERE user_id=?').get(athleteIdentity).count, 2);
+const realAuth = await import(moduleUrl((await readFile(new URL('../lib/auth.ts', import.meta.url), 'utf8'))
+  .replace("import { env } from 'cloudflare:workers';", 'const env = globalThis.__emailTestEnv;')
+  .replace("import { cookies } from 'next/headers';", 'const cookies = async()=>({get:()=>undefined});')
+  .replace("import { redirect } from 'next/navigation';", 'const redirect = ()=>{throw new Error("redirect");};')
+  .replace("'@/lib/athlete-identities'", JSON.stringify(identitiesUrl))));
+const fullToken = await realAuth.createSession(athleteIdentity);
+const fullRequest = new Request('https://example.com/api/athlete/context', { headers: { cookie: `nexo_session=${fullToken}` } });
+assert.equal((await realAuth.getSessionFromRequest(fullRequest)).athleteId, null);
+await realAuth.selectAthleteContext(fullRequest, 'a2');
+assert.equal((await realAuth.getSessionFromRequest(fullRequest)).trainerAccountId, 't2');
+await assert.rejects(()=>realAuth.selectAthleteContext(fullRequest, 'not-owned'), /disponible/);
+const invite = await realAuth.createAthleteAccessToken('a1', 'u1', 't1');
+const scopedToken = await realAuth.redeemAthleteAccessToken(invite);
+await assert.rejects(()=>realAuth.redeemAthleteAccessToken(invite), /utilizado/);
+const scopedRequest = new Request('https://example.com/api/athlete/context', { headers: { cookie: `nexo_session=${scopedToken}` } });
+assert.equal((await realAuth.getSessionFromRequest(scopedRequest)).athleteId, 'a1');
+await assert.rejects(()=>realAuth.selectAthleteContext(scopedRequest, 'a2'), /disponible/);
+db.prepare("UPDATE athletes SET email='changed@example.com' WHERE id='a1'").run();
+assert.equal(await realAuth.getSessionFromRequest(scopedRequest), null);
+assert.equal((await realAuth.getSessionFromRequest(fullRequest)).athleteId, 'a2');
+console.log('PASS: real auth/session/context logic, multi-PF mailbox identity, isolated profile switching, scoped PF invitation cannot reach another PF, one-use invitation, changed-email revocation.');
 const denied = await api.POST(new Request('https://example.com/api/auth/email', { method: 'POST', headers: { origin: 'https://attacker.example' }, body: '{}' }));
 assert.equal(denied.status, 403);
 const callback = await import(moduleUrl((await readFile(new URL('../app/api/admin/email/callback/route.ts', import.meta.url), 'utf8'))

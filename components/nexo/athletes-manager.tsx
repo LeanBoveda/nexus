@@ -2,7 +2,7 @@
 
 /* eslint-disable next/no-html-link-for-pages -- Vinext's Link runtime currently throws during RSC prefetch. */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   Check,
@@ -88,6 +88,17 @@ export function AthletesManager() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({
+    active: 0,
+    paused: 0,
+    withoutGroup: 0,
+  });
+  const requestController = useRef<AbortController | null>(null);
+  const requestGeneration = useRef(0);
+  const pageSize = 50;
   const [statusFilter, setStatusFilter] = useState('all');
   const [groupFilter, setGroupFilter] = useState('all');
   const [formOpen, setFormOpen] = useState(false);
@@ -101,72 +112,89 @@ export function AthletesManager() {
   const [accessCopied, setAccessCopied] = useState(false);
 
   const loadData = useCallback(async () => {
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
+    const generation = ++requestGeneration.current;
+    setLoading(true);
     setError('');
     try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        q: debouncedSearch,
+        status: statusFilter,
+        group: groupFilter,
+      });
       const [athleteResponse, groupResponse] = await Promise.all([
-        fetch('/api/athletes', { cache: 'no-store' }),
-        fetch('/api/groups', { cache: 'no-store' }),
+        fetch(`/api/athletes?${params}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        }),
+        fetch('/api/groups?groupsOnly=1', {
+          cache: 'no-store',
+          signal: controller.signal,
+        }),
       ]);
       if (!athleteResponse.ok)
         throw new Error('No pudimos cargar los clientes.');
       const athleteResult = (await athleteResponse.json()) as {
         athletes?: Athlete[];
+        total: number;
+        page: number;
+        summary: { active: number; paused: number; withoutGroup: number };
       };
       const groupResult = groupResponse.ok
         ? ((await groupResponse.json()) as { groups?: Group[] })
         : { groups: [] };
+      if (generation !== requestGeneration.current || controller.signal.aborted)
+        return;
       setAthletes(athleteResult.athletes ?? []);
+      setTotal(athleteResult.total);
+      setPage(athleteResult.page);
+      setSummary(athleteResult.summary);
       setGroups(groupResult.groups ?? []);
     } catch (caught) {
+      if (controller.signal.aborted || generation !== requestGeneration.current)
+        return;
       setError(
         caught instanceof Error
           ? caught.message
           : 'No pudimos cargar los clientes.',
       );
     } finally {
-      setLoading(false);
+      if (
+        generation === requestGeneration.current &&
+        !controller.signal.aborted
+      )
+        setLoading(false);
     }
-  }, []);
+  }, [page, pageSize, debouncedSearch, statusFilter, groupFilter]);
+
+  useEffect(() => {
+    if (search === debouncedSearch) return;
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, debouncedSearch]);
 
   useEffect(() => {
     const request = window.setTimeout(() => void loadData(), 0);
-    return () => window.clearTimeout(request);
+    return () => {
+      window.clearTimeout(request);
+      requestController.current?.abort();
+    };
   }, [loadData]);
 
   const availableGroups = useMemo(
     () =>
-      Array.from(
-        new Set(athletes.flatMap((athlete) => splitGroups(athlete.groupNames))),
-      ).sort((left, right) => left.localeCompare(right, 'es')),
-    [athletes],
+      Array.from(new Set(groups.map((group) => group.name))).sort(
+        (left, right) => left.localeCompare(right, 'es'),
+      ),
+    [groups],
   );
-
-  const filteredAthletes = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase('es');
-    return athletes.filter((athlete) => {
-      const groupsForAthlete = splitGroups(athlete.groupNames);
-      const matchesSearch =
-        !query ||
-        [
-          athlete.firstName,
-          athlete.lastName,
-          athlete.email,
-          athlete.primaryPosition ?? '',
-          ...groupsForAthlete,
-        ]
-          .join(' ')
-          .toLocaleLowerCase('es')
-          .includes(query);
-      const matchesStatus =
-        statusFilter === 'all' || athlete.status === statusFilter;
-      const matchesGroup =
-        groupFilter === 'all' ||
-        (groupFilter === 'none'
-          ? groupsForAthlete.length === 0
-          : groupsForAthlete.includes(groupFilter));
-      return matchesSearch && matchesStatus && matchesGroup;
-    });
-  }, [athletes, groupFilter, search, statusFilter]);
 
   function openCreate() {
     setEditing(null);
@@ -252,15 +280,9 @@ export function AthletesManager() {
     setAccessCopied(true);
   }
 
-  const activeCount = athletes.filter(
-    (athlete) => athlete.status === 'active',
-  ).length;
-  const pausedCount = athletes.filter(
-    (athlete) => athlete.status === 'paused',
-  ).length;
-  const withoutGroupCount = athletes.filter(
-    (athlete) => Number(athlete.groupCount) === 0,
-  ).length;
+  const activeCount = summary.active;
+  const pausedCount = summary.paused;
+  const withoutGroupCount = summary.withoutGroup;
 
   return (
     <div className="mx-auto max-w-[1500px] px-5 py-6 sm:px-7 lg:px-9 lg:py-8">
@@ -277,10 +299,15 @@ export function AthletesManager() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <AthleteImportDialog groups={groups} onImported={(count, skipped) => {
-            setNotice(`Se importaron ${count} alumnos.${skipped ? ` Se omitieron ${skipped} filas.` : ''}`);
-            void loadData();
-          }} />
+          <AthleteImportDialog
+            groups={groups}
+            onImported={(count, skipped) => {
+              setNotice(
+                `Se importaron ${count} alumnos.${skipped ? ` Se omitieron ${skipped} filas.` : ''}`,
+              );
+              void loadData();
+            }}
+          />
           <Button
             onClick={openCreate}
             className="h-9 rounded-xl bg-[#10253d] px-3.5 text-white hover:bg-[#183653]"
@@ -345,7 +372,10 @@ export function AthletesManager() {
           <div className="grid gap-2 sm:grid-cols-2 lg:ml-auto">
             <NativeSelect
               value={groupFilter}
-              onChange={(event) => setGroupFilter(event.target.value)}
+              onChange={(event) => {
+                setGroupFilter(event.target.value);
+                setPage(1);
+              }}
               aria-label="Filtrar por grupo"
               className="w-full sm:min-w-48"
             >
@@ -361,7 +391,10 @@ export function AthletesManager() {
             </NativeSelect>
             <NativeSelect
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                setPage(1);
+              }}
               aria-label="Filtrar por estado"
               className="w-full sm:min-w-40"
             >
@@ -399,20 +432,20 @@ export function AthletesManager() {
               <TableBody>
                 {loading ? (
                   <LoadingRows />
-                ) : filteredAthletes.length === 0 ? (
+                ) : athletes.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="h-52 text-center">
                       <p className="font-semibold">
-                        {athletes.length === 0
+                        {summary.active + summary.paused === 0
                           ? 'Todavía no cargaste clientes'
                           : 'No encontramos coincidencias'}
                       </p>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {athletes.length === 0
+                        {summary.active + summary.paused === 0
                           ? 'Creá el primero para comenzar a organizar su trabajo.'
                           : 'Probá cambiando la búsqueda o los filtros.'}
                       </p>
-                      {athletes.length === 0 && (
+                      {summary.active + summary.paused === 0 && (
                         <Button
                           onClick={openCreate}
                           className="mt-4 bg-[#10253d] text-white hover:bg-[#183653]"
@@ -423,7 +456,7 @@ export function AthletesManager() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAthletes.map((athlete) => {
+                  athletes.map((athlete) => {
                     const groupNames = splitGroups(athlete.groupNames);
                     return (
                       <TableRow key={athlete.id}>
@@ -544,6 +577,35 @@ export function AthletesManager() {
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3"
+            aria-label="Paginación de clientes"
+          >
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {total === 0
+                ? '0 clientes'
+                : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} de ${total} clientes`}{' '}
+              · Página {page} de {Math.max(1, Math.ceil(total / pageSize))}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || page <= 1}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || page * pageSize >= total}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Siguiente
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -848,7 +910,11 @@ function AthleteFormDialog({
               <Input
                 id="client-context"
                 name="primaryContext"
-                defaultValue={athlete?.primaryContext ? contextLabel(athlete.primaryContext) : ''}
+                defaultValue={
+                  athlete?.primaryContext
+                    ? contextLabel(athlete.primaryContext)
+                    : ''
+                }
                 placeholder="Deporte, disciplina o ámbito"
                 maxLength={100}
               />

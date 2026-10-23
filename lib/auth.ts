@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import {
+  getAthleteContexts,
+  linkLegacyAthleteIdentity,
+} from '@/lib/athlete-identities';
 
 const SESSION_COOKIE = 'nexo_session';
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,6 +23,7 @@ export type NexoUser = {
   trainerAccountId: string | null;
   isPlatformAdmin: boolean;
   accountAccessStatus: 'active' | 'paused' | 'blocked' | null;
+  scopedAthleteId?: string | null;
 };
 
 export async function getAuthStatus() {
@@ -245,74 +250,64 @@ export async function redeemAthleteAccessToken(token: string) {
     }>();
   if (!link) throw new AuthError('El enlace venció o ya fue utilizado.', 401);
 
-  const account = await env.DB.prepare(
-    'SELECT trainer_account_id AS trainerAccountId FROM athletes WHERE id = ?',
+  const existing = await env.DB.prepare(
+    'SELECT id, role FROM users WHERE lower(email) = lower(?) LIMIT 1',
   )
-    .bind(link.athleteId)
-    .first<{ trainerAccountId: string | null }>();
-  const byAthlete =
-    await env.DB.prepare(`SELECT id, role, athlete_id AS athleteId
-    FROM users WHERE athlete_id = ? LIMIT 1`)
-      .bind(link.athleteId)
-      .first<{ id: string; role: string; athleteId: string | null }>();
-  const byEmail = byAthlete
-    ? null
-    : await env.DB.prepare(`SELECT id, role, athlete_id AS athleteId
-        FROM users WHERE lower(email) = lower(?) LIMIT 1`)
-        .bind(link.email)
-        .first<{ id: string; role: string; athleteId: string | null }>();
-  const existing = byAthlete ?? byEmail;
+    .bind(link.email)
+    .first<{ id: string; role: string }>();
   if (existing && existing.role !== 'athlete') {
     throw new AuthError(
       'Ese email pertenece a una cuenta de preparador físico.',
       409,
     );
   }
-  if (existing?.athleteId && existing.athleteId !== link.athleteId) {
-    throw new AuthError('La cuenta ya está vinculada a otro deportista.', 409);
-  }
-
-  const userId = existing?.id ?? crypto.randomUUID();
-  const sessionToken = randomToken(32);
-  const statements: D1PreparedStatement[] = [];
-  if (existing) {
-    statements.push(
-      env.DB.prepare(`UPDATE users SET athlete_id = ?, trainer_account_id = ?, status = 'active'
-        WHERE id = ? AND role = 'athlete'`).bind(
-        link.athleteId,
-        account?.trainerAccountId ?? null,
-        userId,
-      ),
-    );
-  } else {
-    statements.push(
-      env.DB.prepare(`INSERT INTO users
-        (id, trainer_account_id, email, name, role, password_salt, password_hash,
-         athlete_id, status, is_platform_admin, created_at)
-        VALUES (?, ?, ?, ?, 'athlete', NULL, NULL, ?, 'active', 0, ?)`).bind(
-        userId,
-        account?.trainerAccountId ?? null,
+  const claim =
+    await env.DB.prepare(`UPDATE athlete_access_links SET redeemed_at = ?
+    WHERE id = ? AND redeemed_at IS NULL AND expires_at > ? RETURNING id`)
+      .bind(now, link.id, now)
+      .first();
+  if (!claim) throw new AuthError('El enlace venció o ya fue utilizado.', 401);
+  if (!existing) {
+    await env.DB.prepare(`INSERT OR IGNORE INTO users
+      (id, email, name, role, athlete_id, status, is_platform_admin, created_at)
+      VALUES (?, ?, ?, 'athlete', ?, 'active', 0, ?)`)
+      .bind(
+        crypto.randomUUID(),
         link.email.trim().toLowerCase(),
         `${link.firstName} ${link.lastName}`.trim(),
         link.athleteId,
         now,
-      ),
-    );
+      )
+      .run();
   }
-  statements.push(
-    env.DB.prepare(`UPDATE athlete_access_links SET redeemed_at = ?
-      WHERE id = ? AND redeemed_at IS NULL`).bind(now, link.id),
-    env.DB.prepare(`INSERT INTO auth_sessions
-      (token_hash, user_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`).bind(
-      await sha256(sessionToken),
-      userId,
-      now + SESSION_DURATION_MS,
-      now,
-      now,
-    ),
-  );
-  await env.DB.batch(statements);
-  return sessionToken;
+  const identity = await env.DB.prepare(
+    "SELECT id FROM users WHERE lower(email) = lower(?) AND role = 'athlete'",
+  )
+    .bind(link.email)
+    .first<{ id: string }>();
+  if (!identity) throw new AuthError('No se pudo vincular la ficha.', 409);
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO athlete_identities (athlete_id, user_id, created_at) VALUES (?, ?, ?)',
+  )
+    .bind(link.athleteId, identity.id, now)
+    .run();
+  const owner = await env.DB.prepare(
+    'SELECT user_id AS userId FROM athlete_identities WHERE athlete_id = ?',
+  )
+    .bind(link.athleteId)
+    .first<{ userId: string }>();
+  if (owner?.userId !== identity.id)
+    throw new AuthError(
+      'La ficha requiere verificar el email actualizado.',
+      409,
+    );
+  await env.DB.prepare(
+    "UPDATE users SET status = 'active' WHERE id = ? AND role = 'athlete'",
+  )
+    .bind(identity.id)
+    .run();
+  // An invitation from one PF cannot authorize switching to another PF.
+  return createSession(identity.id, link.athleteId, link.athleteId);
 }
 
 export async function destroySession(request: Request) {
@@ -345,12 +340,24 @@ export class AuthError extends Error {
   }
 }
 
-export async function createSession(userId: string) {
+export async function createSession(
+  userId: string,
+  activeAthleteId: string | null = null,
+  scopedAthleteId: string | null = null,
+) {
   const token = randomToken(32);
   const now = Date.now();
   await env.DB.prepare(`INSERT INTO auth_sessions
-    (token_hash, user_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(await sha256(token), userId, now + SESSION_DURATION_MS, now, now)
+    (token_hash, user_id, active_athlete_id, scoped_athlete_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      await sha256(token),
+      userId,
+      activeAthleteId,
+      scopedAthleteId,
+      now + SESSION_DURATION_MS,
+      now,
+      now,
+    )
     .run();
   return token;
 }
@@ -364,21 +371,50 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
     u.athlete_id AS athleteId, u.trainer_account_id AS trainerAccountId,
     u.is_platform_admin AS isPlatformAdmin,
     ta.access_status AS accountAccessStatus,
-    s.expires_at AS expiresAt, s.last_seen_at AS lastSeenAt
+    s.expires_at AS expiresAt, s.last_seen_at AS lastSeenAt,
+    s.active_athlete_id AS activeAthleteId, s.scoped_athlete_id AS scopedAthleteId
     FROM auth_sessions s JOIN users u ON u.id = s.user_id
     LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
     WHERE s.token_hash = ? AND u.status = 'active' LIMIT 1`)
     .bind(tokenHash)
-    .first<NexoUser & { expiresAt: number; lastSeenAt: number }>();
+    .first<
+      NexoUser & {
+        expiresAt: number;
+        lastSeenAt: number;
+        activeAthleteId: string | null;
+      }
+    >();
   if (
     !result ||
     result.expiresAt <= now ||
-    (result.trainerAccountId && result.accountAccessStatus !== 'active')
+    (result.role !== 'athlete' &&
+      result.trainerAccountId &&
+      result.accountAccessStatus !== 'active')
   ) {
     await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash = ?')
       .bind(tokenHash)
       .run();
     return null;
+  }
+  if (result.role === 'athlete') {
+    await linkLegacyAthleteIdentity(result.id);
+    const contexts = await getAthleteContexts(
+      result.id,
+      result.scopedAthleteId,
+    );
+    if (!contexts.length) {
+      await env.DB.prepare('DELETE FROM auth_sessions WHERE token_hash = ?')
+        .bind(tokenHash)
+        .run();
+      return null;
+    }
+    const active =
+      contexts.find(
+        (context) => context.athleteId === result.activeAthleteId,
+      ) ?? (contexts.length === 1 ? contexts[0] : null);
+    result.athleteId = active?.athleteId ?? null;
+    result.trainerAccountId = active?.trainerAccountId ?? null;
+    result.accountAccessStatus = active ? 'active' : null;
   }
   if (now - result.lastSeenAt >= SESSION_TOUCH_INTERVAL_MS) {
     await env.DB.prepare(
@@ -398,7 +434,27 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
       result.role !== 'athlete' &&
       normalizeEmail(result.email) === PLATFORM_ADMIN_EMAIL,
     accountAccessStatus: result.accountAccessStatus,
+    scopedAthleteId: result.scopedAthleteId ?? null,
   };
+}
+
+export async function selectAthleteContext(
+  request: Request,
+  athleteId: string,
+) {
+  const user = await getSessionFromRequest(request);
+  if (!user || user.role !== 'athlete')
+    throw new AuthError('No autorizado.', 401);
+  const contexts = await getAthleteContexts(user.id, user.scopedAthleteId);
+  if (!contexts.some((context) => context.athleteId === athleteId))
+    throw new AuthError('La ficha no está disponible.', 403);
+  const token = readCookie(request.headers.get('cookie'), SESSION_COOKIE);
+  if (!token) throw new AuthError('No autorizado.', 401);
+  await env.DB.prepare(
+    'UPDATE auth_sessions SET active_athlete_id = ? WHERE token_hash = ? AND user_id = ?',
+  )
+    .bind(athleteId, await sha256(token), user.id)
+    .run();
 }
 
 // Bounded, idempotent data migration. Schema migrations remain schema-only.
@@ -447,7 +503,7 @@ export async function createManagedTrainerAccount(input: {
   businessName: string;
   ownerName: string;
   email: string;
-  password: string;
+  password?: string;
   plan: 'starter' | 'pro' | 'team';
   subscriptionStatus: 'trialing' | 'active' | 'past_due' | 'canceled';
   monthlyPriceCents: number;
@@ -456,7 +512,8 @@ export async function createManagedTrainerAccount(input: {
   periodEndsAt: number | null;
 }) {
   const email = normalizeEmail(input.email);
-  validateCredentials(input.ownerName, email, input.password);
+  const password = input.password || randomToken(32);
+  validateCredentials(input.ownerName, email, password);
   const duplicate = await env.DB.prepare(
     'SELECT id FROM users WHERE lower(email) = lower(?) LIMIT 1',
   )
@@ -465,7 +522,7 @@ export async function createManagedTrainerAccount(input: {
   if (duplicate)
     throw new AuthError('Ya existe una cuenta con ese email.', 409);
 
-  const { salt, hash } = await hashPassword(input.password);
+  const { salt, hash } = await hashPassword(password);
   const accountId = crypto.randomUUID();
   const userId = crypto.randomUUID();
   const now = Date.now();

@@ -14,7 +14,6 @@ type AccountInput = {
   businessName?: string;
   ownerName?: string;
   email?: string;
-  password?: string;
   plan?: 'starter' | 'pro' | 'team';
   subscriptionStatus?: 'trialing' | 'active' | 'past_due' | 'canceled';
   accessStatus?: 'active' | 'paused' | 'blocked';
@@ -94,11 +93,10 @@ export async function POST(request: Request) {
   const businessName = input.businessName?.trim() ?? '';
   const ownerName = input.ownerName?.trim() ?? '';
   const email = input.email?.trim() ?? '';
-  const password = input.password ?? '';
-  if (!businessName || !ownerName || !email || password.length < 10) {
+  if (!businessName || !ownerName || !email) {
     return Response.json(
       {
-        error: 'Completá negocio, titular, email y una clave de 10 caracteres.',
+        error: 'Completá negocio, titular y email de ingreso.',
       },
       { status: 400 },
     );
@@ -113,7 +111,6 @@ export async function POST(request: Request) {
       businessName,
       ownerName,
       email,
-      password,
       plan,
       subscriptionStatus,
       monthlyPriceCents: moneyToCents(input.monthlyPrice),
