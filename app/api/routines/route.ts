@@ -16,7 +16,7 @@ type RoutineContent = {
 };
 
 type RoutineAction = {
-  action?: 'save' | 'assign' | 'archive';
+  action?: 'save' | 'assign' | 'archive' | 'duplicate';
   routineId?: string;
   name?: string;
   description?: string;
@@ -148,6 +148,66 @@ export async function POST(request: Request) {
   const db = getD1();
 
   try {
+    if (input.action === 'duplicate') {
+      const source = await db
+        .prepare(`SELECT r.name, r.description, rv.content
+        FROM routines r JOIN routine_versions rv ON rv.routine_id = r.id
+        WHERE r.id = ? AND r.trainer_account_id = ? AND r.status != 'archived'
+        ORDER BY rv.version_number DESC LIMIT 1`)
+        .bind(input.routineId || '', user.trainerAccountId)
+        .first<{ name: string; description: string | null; content: string }>();
+      if (!source)
+        return Response.json(
+          { error: 'La rutina no existe.' },
+          { status: 404 },
+        );
+      const content =
+        input.content === undefined
+          ? source.content
+          : validateContent(input.content);
+      if (!content)
+        return Response.json(
+          { error: 'Completá las semanas y los ejercicios antes de duplicar.' },
+          { status: 400 },
+        );
+      const routineId = crypto.randomUUID();
+      const versionId = crypto.randomUUID();
+      const name = input.name?.trim() || `${source.name} (copia)`;
+      await db.batch([
+        db
+          .prepare(`INSERT INTO routines (id, trainer_account_id, name, description, status, created_by, created_at)
+          VALUES (?, ?, ?, ?, 'published', ?, ?)`)
+          .bind(
+            routineId,
+            user.trainerAccountId,
+            name,
+            input.description === undefined
+              ? source.description
+              : input.description.trim() || null,
+            user.id,
+            Date.now(),
+          ),
+        db
+          .prepare(
+            'INSERT INTO routine_versions (id, routine_id, version_number, content, created_at) VALUES (?, ?, 1, ?, ?)',
+          )
+          .bind(
+            versionId,
+            routineId,
+            typeof content === 'string' ? content : JSON.stringify(content),
+            Date.now(),
+          ),
+        db
+          .prepare(
+            'INSERT INTO routine_files (routine_id, file_id) SELECT ?, file_id FROM routine_files WHERE routine_id = ?',
+          )
+          .bind(routineId, input.routineId),
+      ]);
+      return Response.json(
+        { ok: true, routineId, versionId, versionNumber: 1, name },
+        { status: 201 },
+      );
+    }
     if (input.action === 'save') {
       const name = input.name?.trim();
       const content = validateContent(input.content);
@@ -302,11 +362,19 @@ export async function POST(request: Request) {
       const assignmentId = crypto.randomUUID();
       const now = Date.now();
       await db.batch([
-        db.prepare(`UPDATE routine_assignments SET ends_on = date(?, '-1 day')
+        db
+          .prepare(`UPDATE routine_assignments SET ends_on = date(?, '-1 day')
           WHERE target_type = ? AND target_id = ? AND starts_on < ?
             AND (ends_on IS NULL OR ends_on >= ?)
             AND routine_version_id IN (SELECT id FROM routine_versions WHERE routine_id = ?)`)
-          .bind(input.startsOn, input.targetType, input.targetId, input.startsOn, input.startsOn, input.routineId),
+          .bind(
+            input.startsOn,
+            input.targetType,
+            input.targetId,
+            input.startsOn,
+            input.startsOn,
+            input.routineId,
+          ),
         db
           .prepare(
             `INSERT INTO routine_assignments

@@ -24,6 +24,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { RoutineQuickAssign } from '@/components/nexo/routine-quick-assign';
 
 type RoutineSummary = {
   id: string;
@@ -58,6 +59,36 @@ export function RoutinesManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [archivingId, setArchivingId] = useState('');
+  const [duplicatingId, setDuplicatingId] = useState('');
+  const [notice, setNotice] = useState('');
+
+  async function duplicate(routine: RoutineSummary) {
+    setDuplicatingId(routine.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await fetch('/api/routines', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'duplicate', routineId: routine.id }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok)
+        throw new Error(result.error || 'No se pudo duplicar la rutina.');
+      await load();
+      setNotice(
+        `Copia de “${routine.name}” creada, sin asignaciones. Podés abrirla y editarla.`,
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'No se pudo duplicar la rutina.',
+      );
+    } finally {
+      setDuplicatingId('');
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -182,6 +213,14 @@ export function RoutinesManager() {
         />
       </div>
 
+      {notice && (
+        <p
+          role="status"
+          className="mt-4 rounded-xl bg-[#f1f7e8] p-3 text-sm text-[#52751d]"
+        >
+          {notice}
+        </p>
+      )}
       {error && (
         <div
           role="alert"
@@ -295,7 +334,32 @@ export function RoutinesManager() {
                     >
                       Versión {routine.versionNumber}
                     </Badge>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <RoutineQuickAssign
+                        routineId={routine.id}
+                        routineName={routine.name}
+                        onAssigned={() => {
+                          setNotice(
+                            `Rutina “${routine.name}” asignada correctamente.`,
+                          );
+                          void load();
+                        }}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={
+                          Boolean(duplicatingId) || archivingId === routine.id
+                        }
+                        onClick={() => void duplicate(routine)}
+                      >
+                        {duplicatingId === routine.id ? (
+                          <LoaderCircle className="animate-spin" />
+                        ) : (
+                          <Copy />
+                        )}{' '}
+                        Duplicar
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

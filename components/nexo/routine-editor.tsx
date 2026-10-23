@@ -512,7 +512,7 @@ export function RoutineEditor() {
     markDirty();
   }
 
-  async function saveRoutine() {
+  async function saveRoutine(asCopy = false) {
     setSaving(true);
     setError('');
     setNotice('');
@@ -528,9 +528,9 @@ export function RoutineEditor() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          action: 'save',
+          action: asCopy && routineId ? 'duplicate' : 'save',
           routineId: routineId || undefined,
-          name: routineName,
+          name: asCopy ? `${routineName} (copia)` : routineName,
           description,
           content: {
             weeklyGoal: sessions.length,
@@ -549,12 +549,15 @@ export function RoutineEditor() {
         throw new Error(result.error || 'No se pudo guardar la rutina.');
       }
       setRoutineId(result.routineId);
+      if (asCopy) setRoutineName(`${routineName} (copia)`);
       setVersionNumber(result.versionNumber ?? versionNumber + 1);
       setSaved(true);
       setNotice(
-        routineId
-          ? 'Nueva versión guardada. Las asignaciones anteriores conservan su versión; usá Asignar rutina para entregar la nueva.'
-          : 'La planificación semanal quedó guardada.',
+        asCopy
+          ? 'Copia independiente creada. No tiene asignaciones; podés editarla o asignarla sin modificar la original.'
+          : routineId
+            ? 'Nueva versión guardada. Las asignaciones anteriores conservan su versión; usá Asignar rutina para entregar la nueva.'
+            : 'La planificación semanal quedó guardada.',
       );
       window.history.replaceState(
         null,
@@ -681,6 +684,14 @@ export function RoutineEditor() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2 xl:ml-auto">
+          <Button
+            variant="outline"
+            className="h-10 rounded-xl"
+            disabled={saving || assigning}
+            onClick={() => void saveRoutine(true)}
+          >
+            <Copy /> Duplicar rutina
+          </Button>
           <Button
             variant="outline"
             className="h-10 rounded-xl"
