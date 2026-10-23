@@ -80,7 +80,12 @@ export async function GET(request: Request) {
         .all(),
       db
         .prepare(
-          "SELECT id, first_name AS firstName, last_name AS lastName, email, primary_position AS primaryPosition FROM athletes WHERE trainer_account_id = ? AND status = 'active' ORDER BY last_name, first_name",
+          `SELECT a.id, a.first_name AS firstName, a.last_name AS lastName, a.email, a.primary_position AS primaryPosition,
+            (SELECT json_group_array(gm.group_id) FROM group_memberships gm
+              JOIN groups g ON g.id = gm.group_id JOIN organizations o ON o.id = g.organization_id
+              WHERE gm.athlete_id = a.id AND gm.ended_at IS NULL AND g.active = 1
+                AND o.trainer_account_id = a.trainer_account_id) AS groupIdsJson
+            FROM athletes a WHERE a.trainer_account_id = ? AND a.status = 'active' ORDER BY a.last_name, a.first_name`,
         )
         .bind(user.trainerAccountId)
         .all(),
@@ -107,7 +112,10 @@ export async function GET(request: Request) {
       templates: templates.results,
       metrics: metrics.results.filter((m) => m.archivedAt == null),
       historicalMetrics: metrics.results,
-      athletes: athletes.results,
+      athletes: athletes.results.map(({ groupIdsJson, ...athlete }) => ({
+        ...athlete,
+        groupIds: JSON.parse(String(groupIdsJson || '[]')),
+      })),
       groups: groups.results,
       results: results.results,
     });

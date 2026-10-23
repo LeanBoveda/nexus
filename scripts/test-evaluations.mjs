@@ -34,6 +34,7 @@ CREATE TABLE evaluation_metrics (id TEXT PRIMARY KEY, template_id TEXT REFERENCE
 CREATE TABLE athletes (id TEXT PRIMARY KEY, trainer_account_id TEXT, first_name TEXT, last_name TEXT, email TEXT, primary_position TEXT, status TEXT);
 CREATE TABLE organizations (id TEXT PRIMARY KEY, trainer_account_id TEXT);
 CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT, active INTEGER, organization_id TEXT);
+CREATE TABLE group_memberships (group_id TEXT, athlete_id TEXT, ended_at INTEGER);
 CREATE TABLE evaluation_sessions (id TEXT PRIMARY KEY, template_id TEXT REFERENCES evaluation_templates(id), athlete_id TEXT REFERENCES athletes(id), group_id TEXT, evaluated_at INTEGER, surface TEXT, notes TEXT, created_at INTEGER, archived_at INTEGER);
 CREATE TABLE evaluation_results (session_id TEXT REFERENCES evaluation_sessions(id), metric_id TEXT REFERENCES evaluation_metrics(id), value REAL, PRIMARY KEY(session_id,metric_id));
 INSERT INTO athletes VALUES ('athlete-a','tenant-a','Ana','Pérez','a@example.com',NULL,'active'),('athlete-b','tenant-b','Bruno','Pérez','b@example.com',NULL,'active');`);
@@ -117,6 +118,13 @@ const { templateId } = await post(
   { action: 'createTemplate', name: 'Resistencia', sport: 'Natación' },
   201,
 );
+sql.exec(`INSERT INTO organizations VALUES ('org-a','tenant-a'),('org-b','tenant-b');
+INSERT INTO groups VALUES ('group-a','Grupo A',1,'org-a'),('group-ended','Baja',1,'org-a'),('group-inactive','Archivado',0,'org-a'),('group-foreign','Ajeno',1,'org-b');
+INSERT INTO group_memberships VALUES ('group-a','athlete-a',NULL),('group-ended','athlete-a',1),('group-inactive','athlete-a',NULL),('group-foreign','athlete-a',NULL);`);
+const roster = await get(`?templateId=${templateId}`);
+assert.equal(roster.athletes.length, 1, 'El listado no expone jugadores de otro PF');
+assert.deepEqual(roster.athletes[0].groupIds, ['group-a'], 'Sólo membresías vigentes de grupos activos del mismo PF');
+assert.ok(!('groupIdsJson' in roster.athletes[0]));
 const { metricId } = await post(
   {
     action: 'createMetric',

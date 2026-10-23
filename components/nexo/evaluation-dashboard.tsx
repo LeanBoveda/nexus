@@ -39,6 +39,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { filterEvaluationAthletes } from '@/lib/evaluation-athlete-filters';
 import {
   Table,
   TableBody,
@@ -65,6 +66,7 @@ type Athlete = {
   lastName: string;
   email: string;
   primaryPosition: string | null;
+  groupIds: string[];
 };
 type Group = { id: string; name: string };
 type ResultRow = {
@@ -121,6 +123,12 @@ export function EvaluationDashboard({
     results: [],
   });
   const [selectedAthleteId, setSelectedAthleteId] = useState(athleteId ?? '');
+  const [athleteFilters, setAthleteFilters] = useState({
+    query: '',
+    groupId: '',
+    position: '',
+    evaluated: '',
+  });
   const [selectedMetricId, setSelectedMetricId] = useState('');
   const [evaluatedAt, setEvaluatedAt] = useState(today());
   const [surface, setSurface] = useState('indoor');
@@ -203,6 +211,29 @@ export function EvaluationDashboard({
   const selectedAthlete = data.athletes.find(
     (athlete) => athlete.id === selectedAthleteId,
   );
+  const evaluatedIds = useMemo(
+    () =>
+      new Set(
+        data.results
+          .filter((row) => !row.archivedAt)
+          .map((row) => row.athleteId),
+      ),
+    [data.results],
+  );
+  const filteredAthletes = useMemo(
+    () => filterEvaluationAthletes(data.athletes, athleteFilters, evaluatedIds),
+    [data.athletes, athleteFilters, evaluatedIds],
+  );
+  const positions = [
+    ...new Set(
+      data.athletes
+        .map((athlete) => athlete.primaryPosition)
+        .filter((position): position is string => Boolean(position)),
+    ),
+  ].sort((a, b) => a.localeCompare(b, 'es'));
+  const selectedOutsideFilter =
+    selectedAthlete &&
+    !filteredAthletes.some((athlete) => athlete.id === selectedAthleteId);
   const athleteResults = useMemo(
     () => data.results.filter((row) => row.athleteId === selectedAthleteId),
     [data.results, selectedAthleteId],
@@ -594,6 +625,117 @@ export function EvaluationDashboard({
           {message}
         </output>
       )}
+      {!athleteId && (
+        <section
+          aria-label="Buscar y filtrar jugadores"
+          className="mb-5 rounded-2xl border bg-card p-4"
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Buscar jugador">
+              <Input
+                aria-label="Buscar jugador"
+                placeholder="Nombre, apellido o email…"
+                value={athleteFilters.query}
+                onChange={(event) =>
+                  setAthleteFilters((current) => ({
+                    ...current,
+                    query: event.target.value,
+                  }))
+                }
+              />
+            </Field>
+            <Field label="Filtrar por grupo">
+              <select
+                aria-label="Filtrar por grupo"
+                className="h-10 w-full rounded-xl border bg-card px-3 text-sm"
+                value={athleteFilters.groupId}
+                onChange={(event) =>
+                  setAthleteFilters((current) => ({
+                    ...current,
+                    groupId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Todos los grupos</option>
+                <option value="__ungrouped">Sin grupo</option>
+                {data.groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Filtrar por posición">
+              <select
+                aria-label="Filtrar por posición"
+                className="h-10 w-full rounded-xl border bg-card px-3 text-sm"
+                value={athleteFilters.position}
+                onChange={(event) =>
+                  setAthleteFilters((current) => ({
+                    ...current,
+                    position: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Todas las posiciones</option>
+                {positions.map((position) => (
+                  <option key={position} value={position}>
+                    {position}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Evaluaciones en esta plantilla">
+              <select
+                aria-label="Evaluaciones en esta plantilla"
+                className="h-10 w-full rounded-xl border bg-card px-3 text-sm"
+                value={athleteFilters.evaluated}
+                onChange={(event) =>
+                  setAthleteFilters((current) => ({
+                    ...current,
+                    evaluated: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Todos los jugadores</option>
+                <option value="yes">Con evaluaciones</option>
+                <option value="no">Sin evaluaciones</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <p role="status">
+              {loading
+                ? 'Cargando jugadores…'
+                : `${filteredAthletes.length} de ${data.athletes.length} jugadores`}
+              {!loading && !filteredAthletes.length
+                ? ' · No hay coincidencias.'
+                : ''}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!Object.values(athleteFilters).some(Boolean)}
+              onClick={() =>
+                setAthleteFilters({
+                  query: '',
+                  groupId: '',
+                  position: '',
+                  evaluated: '',
+                })
+              }
+            >
+              Limpiar filtros
+            </Button>
+          </div>
+          {selectedOutsideFilter && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              La ficha seleccionada se mantiene aunque no coincida con los
+              filtros. Elegí otro jugador para cambiarla.
+            </p>
+          )}
+        </section>
+      )}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="grid gap-3 sm:grid-cols-2">
           {!athleteId && (
@@ -610,7 +752,13 @@ export function EvaluationDashboard({
                 className="h-10 min-w-64 rounded-xl border border-border bg-card px-3 text-sm font-semibold outline-none focus:border-[#8fbc29]"
               >
                 <option value="">Elegir deportista</option>
-                {data.athletes.map((athlete) => (
+                {selectedOutsideFilter && (
+                  <option value={selectedAthlete.id}>
+                    {selectedAthlete.firstName} {selectedAthlete.lastName}{' '}
+                    (seleccionado · fuera del filtro)
+                  </option>
+                )}
+                {filteredAthletes.map((athlete) => (
                   <option key={athlete.id} value={athlete.id}>
                     {athlete.firstName} {athlete.lastName}
                   </option>
