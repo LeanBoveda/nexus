@@ -4,17 +4,19 @@ import {
   addTrainingDays,
   filterTrainingOverview,
   type TrainingOverview,
+  type TrainingLoad,
 } from '@/lib/training-overview';
 
 const fieldClass =
   'rounded-xl border border-[#dce3d7] bg-white px-3 py-2 text-sm';
+const dateFormatter = new Intl.DateTimeFormat('es-AR', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'America/Argentina/Buenos_Aires',
+});
 function formatDate(date: string) {
-  return new Intl.DateTimeFormat('es-AR', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'America/Argentina/Buenos_Aires',
-  }).format(new Date(`${date}T12:00:00Z`));
+  return dateFormatter.format(new Date(`${date}T12:00:00Z`));
 }
 function avg(values: Array<number | null>) {
   const numbers = values.filter((value): value is number => value !== null);
@@ -38,16 +40,22 @@ export function TrainingOverviewView({
   mode: 'agenda' | 'carga';
   from: string;
   to: string;
-  data: TrainingOverview;
+  data: TrainingOverview | TrainingLoad;
   athleteId?: string;
   groupId?: string;
   groups?: { id: string; name: string; organizationName: string }[];
 }) {
-  const people = [
+  const load = 'summary' in data ? data : undefined;
+  const people = load?.people ?? [
     ...new Map(data.assignments.map((item) => [item.athleteId, item])).values(),
   ];
   const filtered = filterTrainingOverview(data, athleteId, groupId);
   const entries = filtered.entries.sort((a, b) => b.date.localeCompare(a.date));
+  const entryByDate = new Map<string, (typeof entries)[number]>();
+  for (const entry of entries) {
+    const key = `${entry.instanceId}:${entry.date}`;
+    if (!entryByDate.has(key)) entryByDate.set(key, entry);
+  }
   const dayCount =
     mode === 'agenda'
       ? 7
@@ -58,7 +66,7 @@ export function TrainingOverviewView({
               86400000,
           ) + 1,
         );
-  const calendar = Array.from({ length: dayCount }, (_, index) =>
+  const calendar = Array.from({ length: load ? 0 : dayCount }, (_, index) =>
     addTrainingDays(from, index),
   ).map((date) => ({
     date,
@@ -76,26 +84,34 @@ export function TrainingOverviewView({
               {
                 assignment,
                 routine,
-                log: entries.find(
-                  (item) =>
-                    item.instanceId === assignment.instanceId &&
-                    item.date === date,
-                ),
+                log: entryByDate.get(`${assignment.instanceId}:${date}`),
               },
             ]
           : [];
       }),
   }));
-  const planned = calendar.reduce(
-    (total, day) => total + day.sessions.length,
-    0,
-  );
-  const completed = calendar.reduce(
-    (total, day) =>
-      total +
-      day.sessions.filter((session) => session.log?.completedAt != null).length,
-    0,
-  );
+  const planned =
+    load?.summary.planned ??
+    calendar.reduce((total, day) => total + day.sessions.length, 0);
+  const completed =
+    load?.summary.completed ??
+    calendar.reduce(
+      (total, day) =>
+        total +
+        day.sessions.filter((session) => session.log?.completedAt != null)
+          .length,
+      0,
+    );
+  const pageHref = (page: number) => {
+    const params = new URLSearchParams({ from, to, page: String(page) });
+    if (athleteId) params.set('athlete', athleteId);
+    if (groupId) params.set('group', groupId);
+    return `/carga?${params.toString()}`;
+  };
+  const averageLabel = (value: number | null) =>
+    value === null
+      ? '—'
+      : value.toLocaleString('es-AR', { maximumFractionDigits: 1 });
   return (
     <div className="mx-auto max-w-[1500px] space-y-5 px-5 py-6 sm:px-7 lg:px-9">
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -268,10 +284,20 @@ export function TrainingOverviewView({
         <>
           <div className="grid gap-3 sm:grid-cols-4">
             {[
-              ['Registros', String(entries.length)],
+              ['Registros', String(load?.summary.total ?? entries.length)],
               ['Sesiones completadas / previstas', `${completed}/${planned}`],
-              ['PSE medio', avg(entries.map((entry) => entry.pse))],
-              ['Dolor medio', avg(entries.map((entry) => entry.pain))],
+              [
+                'PSE medio',
+                load
+                  ? averageLabel(load.summary.pse)
+                  : avg(entries.map((entry) => entry.pse)),
+              ],
+              [
+                'Dolor medio',
+                load
+                  ? averageLabel(load.summary.pain)
+                  : avg(entries.map((entry) => entry.pain)),
+              ],
             ].map(([label, value]) => (
               <section
                 key={label}
@@ -351,6 +377,47 @@ export function TrainingOverviewView({
               </p>
             )}
           </section>
+          {load && (
+            <nav
+              aria-label="Páginas de registros"
+              className="flex flex-wrap items-center justify-between gap-3 text-sm"
+            >
+              <p>
+                Mostrando{' '}
+                {load.pagination.total
+                  ? (load.pagination.page - 1) * load.pagination.pageSize + 1
+                  : 0}
+                –
+                {Math.min(
+                  load.pagination.page * load.pagination.pageSize,
+                  load.pagination.total,
+                )}{' '}
+                de {load.pagination.total} registros. Los indicadores incluyen
+                todo el período filtrado.
+              </p>
+              <div className="flex items-center gap-3">
+                {load.pagination.page > 1 && (
+                  <a
+                    className={fieldClass}
+                    href={pageHref(load.pagination.page - 1)}
+                  >
+                    Anterior
+                  </a>
+                )}
+                <span>
+                  Página {load.pagination.page} de {load.pagination.pages}
+                </span>
+                {load.pagination.page < load.pagination.pages && (
+                  <a
+                    className={fieldClass}
+                    href={pageHref(load.pagination.page + 1)}
+                  >
+                    Siguiente
+                  </a>
+                )}
+              </div>
+            </nav>
+          )}
         </>
       )}
     </div>

@@ -37,6 +37,8 @@ const {
   canonicalTrainingLogs,
   trainingLogDate,
   getTrainingOverview,
+  getTrainingLoad,
+  addTrainingDays,
   filterTrainingOverview,
 } = await import(overviewUrl);
 assert.deepEqual(overviewRange('2020-01-01', '2026-10-21'), {
@@ -64,6 +66,9 @@ globalThis.__overviewDB = {
         return {
           async all() {
             return { results: db.prepare(sql).all(...values) };
+          },
+          async first() {
+            return db.prepare(sql).get(...values) ?? null;
           },
         };
       },
@@ -202,4 +207,141 @@ assert.equal(
 );
 console.log(
   'Agenda/Carga: fechas acotadas, SQL real migrado, aislamiento PF/ficha y compatibilidad legacy: OK.',
+);
+
+// Modern SQL pagination: summaries and filters must cover the entire period.
+db.exec(`DELETE FROM workout_logs;
+UPDATE athlete_routine_instances SET status='active',ended_on=NULL;
+UPDATE routine_assignments SET starts_on='2026-07-01';
+INSERT INTO athletes(id,trainer_account_id,first_name,last_name,email) VALUES('a3','p1','Otra','Persona','otra@example.test');
+INSERT INTO athlete_routine_instances(id,assignment_id,athlete_id,status) VALUES('i3','ra1','a3','active');`);
+const writeLog =
+  db.prepare(`INSERT INTO workout_logs(id,instance_id,athlete_id,session_key,entry_key,trained_on,completed_at,pse,pain,actual_values,created_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?)`);
+for (const [athlete, instance] of [
+  ['a1', 'i1'],
+  ['a3', 'i3'],
+  ['a2', 'i2'],
+]) {
+  for (let i = 0; i < 60; i++) {
+    const day = addTrainingDays('2026-08-20', i);
+    writeLog.run(
+      `${athlete}-${i}`,
+      instance,
+      athlete,
+      `date-${day}-session-wed`,
+      `${instance}:${athlete}:${day}`,
+      day,
+      i % 3 ? Date.parse(`${day}T12:00:00Z`) : null,
+      i % 10,
+      i % 2 ? null : 2,
+      '{}',
+      1000 + i,
+    );
+  }
+}
+const from = '2026-08-20',
+  to = '2026-10-18';
+const page1 = await getTrainingLoad('p1', from, to);
+const page2 = await getTrainingLoad('p1', from, to, { page: 2 });
+const page3 = await getTrainingLoad('p1', from, to, { page: 999 });
+assert.deepEqual(
+  [page1.entries.length, page2.entries.length, page3.entries.length],
+  [50, 50, 20],
+);
+assert.equal(
+  new Set(
+    [...page1.entries, ...page2.entries, ...page3.entries].map((e) => e.id),
+  ).size,
+  120,
+);
+assert.deepEqual(page1.summary, page2.summary);
+assert.equal(page1.summary.total, 120);
+assert.equal(page1.summary.pse, 4.5);
+assert.equal(page1.summary.pain, 2);
+assert.equal(page3.pagination.page, 3);
+assert.equal(
+  (await getTrainingLoad('p1', from, to, { page: 'bad' })).pagination.page,
+  1,
+);
+assert.equal(
+  (await getTrainingLoad('p1', from, to, { page: '-1' })).pagination.page,
+  1,
+);
+for (const [filters, expected] of [
+  [{ groupId: 'g1' }, 60],
+  [{ groupId: 'g2' }, 60],
+  [{ groupId: '__ungrouped' }, 60],
+  [{ athleteId: 'a1' }, 60],
+  [{ athleteId: 'a2' }, 0],
+  [{ groupId: 'foreign' }, 0],
+  [{ groupId: 'unknown' }, 0],
+  [{ groupId: 'gone' }, 0],
+  [{ groupId: 'inactive' }, 0],
+  [{ athleteId: 'a3', groupId: 'g1' }, 0],
+]) {
+  const filtered = await getTrainingLoad('p1', from, to, filters);
+  assert.equal(filtered.summary.total, expected, JSON.stringify(filters));
+  assert.ok(filtered.entries.every((e) => e.athleteId !== 'a2'));
+  if (!expected) {
+    assert.equal(filtered.summary.planned, 0);
+    assert.equal(filtered.summary.pse, null);
+    assert.equal(filtered.pagination.pages, 1);
+  }
+}
+// Compare planned/completed with the original calendar behavior.
+const { resolveRoutineSession } = await import(portalUrl);
+let planned = 0,
+  completed = 0;
+const all = await getTrainingOverview('p1', from, to);
+for (let day = from; day <= to; day = addTrainingDays(day, 1))
+  for (const assignment of all.assignments) {
+    if (!resolveRoutineSession(assignment, day).scheduledToday) continue;
+    planned++;
+    if (
+      all.entries.find(
+        (e) => e.instanceId === assignment.instanceId && e.date === day,
+      )?.completedAt != null
+    )
+      completed++;
+  }
+assert.equal(page1.summary.planned, planned);
+assert.equal(page1.summary.completed, completed);
+// Legacy records still shadow correctly and cancelled plans keep past data.
+db.exec(
+  "UPDATE athlete_routine_instances SET status='cancelled',ended_on='2026-10-01' WHERE id='i1'",
+);
+const modernCancelled = await getTrainingLoad('p1', from, to, {
+  athleteId: 'a1',
+});
+assert.ok(modernCancelled.entries.every((e) => e.date < '2026-10-01'));
+assert.equal(
+  modernCancelled.summary.total,
+  (await getTrainingOverview('p1', from, to, 'a1')).entries.length,
+);
+db.exec(
+  "UPDATE athlete_routine_instances SET status='active',ended_on=NULL WHERE id='i1'",
+);
+db.prepare(`INSERT INTO workout_logs(id,instance_id,athlete_id,session_key,completed_at,pse,pain,actual_values)
+  VALUES('old','i1','a1',?,1,10,9,'{}')`).run(legacyKey);
+db.prepare(
+  'UPDATE workout_logs SET actual_values=?, completed_at=NULL WHERE id=?',
+).run(JSON.stringify({ legacySessionKeys: [legacyKey] }), 'a1-55');
+const legacyLoad = await getTrainingLoad('p1', from, to);
+const legacyFull = await getTrainingOverview('p1', from, to);
+assert.equal(legacyLoad.summary.total, legacyFull.entries.length);
+assert.equal(legacyLoad.entries.length, 50);
+db.exec(
+  "UPDATE athlete_routine_instances SET status='cancelled',ended_on='2026-10-01' WHERE id='i1'",
+);
+const cancelledLoad = await getTrainingLoad('p1', from, to, {
+  athleteId: 'a1',
+});
+assert.ok(cancelledLoad.entries.every((e) => e.date < '2026-10-01'));
+assert.equal(
+  cancelledLoad.summary.total,
+  (await getTrainingOverview('p1', from, to, 'a1')).entries.length,
+);
+console.log(
+  'PASS Carga: SQL pagination, whole-period totals, stable pages, group/athlete filters, tenant isolation, calendar parity, legacy shadowing and cancellation.',
 );

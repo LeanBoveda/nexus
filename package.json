@@ -12,7 +12,8 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
-    "test": "node scripts/run-tests.mjs"
+    "test": "node scripts/run-tests.mjs",
+    "test:capacity": "node scripts/validate-capacity.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

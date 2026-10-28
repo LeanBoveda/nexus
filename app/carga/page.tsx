@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { AppShell } from '@/components/nexo/app-shell';
 import { TrainingOverviewView } from '@/components/nexo/training-overview';
 import { requireSession } from '@/lib/auth';
-import { getTrainingOverview, overviewRange } from '@/lib/training-overview';
+import { getTrainingLoad, overviewRange } from '@/lib/training-overview';
 import { getD1 } from '@/db';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +14,7 @@ export default async function LoadPage({
     to?: string;
     athlete?: string;
     group?: string;
+    page?: string;
   }>;
 }) {
   const user = await requireSession();
@@ -21,10 +22,11 @@ export default async function LoadPage({
   if (!user.trainerAccountId) redirect('/admin');
   const query = await searchParams;
   const range = overviewRange(query.from, query.to);
-  const data = await getTrainingOverview(
+  const data = await getTrainingLoad(
     user.trainerAccountId,
     range.from,
     range.to,
+    { athleteId: query.athlete, groupId: query.group, page: query.page },
   );
   const groups = await getD1()
     .prepare(`SELECT g.id, g.name, o.name AS organizationName FROM groups g
@@ -32,11 +34,6 @@ export default async function LoadPage({
     WHERE g.active = 1 AND o.trainer_account_id = ? ORDER BY g.name, o.name`)
     .bind(user.trainerAccountId)
     .all<{ id: string; name: string; organizationName: string }>();
-  const athlete = data.assignments.some(
-    (item) => item.athleteId === query.athlete,
-  )
-    ? query.athlete
-    : undefined;
   return (
     <AppShell active="carga">
       <TrainingOverviewView
@@ -44,7 +41,7 @@ export default async function LoadPage({
         from={range.from}
         to={range.to}
         data={data}
-        athleteId={athlete}
+        athleteId={query.athlete}
         groupId={query.group}
         groups={groups.results}
       />
