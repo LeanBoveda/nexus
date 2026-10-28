@@ -266,12 +266,6 @@ export function LoginForm({
                 <ArrowRight className="size-4" />
               </button>
             </form>
-            <a
-              href="/recuperar-correo"
-              className="mt-4 block text-center text-xs text-muted-foreground underline"
-            >
-              ¿No llegan los correos? Ayuda para el administrador
-            </a>
             {emailEnabled && (
               <button
                 type="button"
