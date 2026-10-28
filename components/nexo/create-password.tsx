@@ -57,7 +57,7 @@ export function CreatePassword({ email }: { email: string }) {
               name="password"
               type={visible ? 'text' : 'password'}
               autoComplete="new-password"
-              minLength={10}
+              minLength={6}
               maxLength={128}
               required
               disabled={busy}
@@ -70,7 +70,7 @@ export function CreatePassword({ email }: { email: string }) {
               name="confirmation"
               type={visible ? 'text' : 'password'}
               autoComplete="new-password"
-              minLength={10}
+              minLength={6}
               maxLength={128}
               required
               disabled={busy}
@@ -78,7 +78,7 @@ export function CreatePassword({ email }: { email: string }) {
             />
           </label>
           <p className="text-xs text-muted-foreground">
-            Entre 10 y 128 caracteres. No uses una contraseña que compartas con
+            Entre 6 y 128 caracteres. No uses una contraseña que compartas con
             otras personas.
           </p>
           <label className="flex items-center gap-2 text-sm">

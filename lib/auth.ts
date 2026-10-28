@@ -68,10 +68,10 @@ export async function configureFirstPassword(
     );
   if (
     typeof password !== 'string' ||
-    password.length < 10 ||
+    password.length < 6 ||
     password.length > 128
   )
-    throw new AuthError('Usá una contraseña de entre 10 y 128 caracteres.');
+    throw new AuthError('Usá una contraseña de entre 6 y 128 caracteres.');
   if (confirmation !== password)
     throw new AuthError('Las contraseñas no coinciden.');
   const { salt, hash } = await hashPassword(password);
@@ -694,8 +694,8 @@ function validateCredentials(name: string, email: string, password: string) {
   if (name.trim().length < 2)
     throw new AuthError('Ingresá tu nombre completo.');
   if (!email.includes('@')) throw new AuthError('Ingresá un email válido.');
-  if (password.length < 10)
-    throw new AuthError('La contraseña debe tener al menos 10 caracteres.');
+  if (password.length < 6)
+    throw new AuthError('La contraseña debe tener al menos 6 caracteres.');
 }
 
 function normalizeEmail(email: string) {

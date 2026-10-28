@@ -194,9 +194,9 @@ export function LoginForm({
                         setupRequired ? 'new-password' : 'current-password'
                       }
                       placeholder={
-                        setupRequired ? 'Mínimo 10 caracteres' : 'Tu contraseña'
+                        setupRequired ? 'Mínimo 6 caracteres' : 'Tu contraseña'
                       }
-                      minLength={setupRequired ? 10 : undefined}
+                      minLength={setupRequired ? 6 : undefined}
                       required
                       className="pr-11"
                     />

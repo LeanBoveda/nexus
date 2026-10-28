@@ -149,8 +149,8 @@ await assert.rejects(
   () =>
     auth.configureFirstPassword(
       request('/api/auth/password', legacyToken, {}),
-      'Nueva-segura-123',
-      'Nueva-segura-123',
+      'Nueva6',
+      'Nueva6',
     ),
   /venció/,
   'Existing session alone is not mailbox verification',
@@ -161,7 +161,7 @@ assert.equal(
       request(
         '/api/auth/password',
         setup.token,
-        { password: 'Nueva-segura-123', confirmation: 'Nueva-segura-123' },
+        { password: 'Nueva6', confirmation: 'Nueva6' },
         'https://other.test',
       ),
     )
@@ -183,7 +183,7 @@ assert.equal(
   (
     await api.POST(
       request('/api/auth/password', setup.token, {
-        password: 'Nueva-segura-123',
+        password: 'Nueva6',
         confirmation: 'Otra-segura-123',
       }),
     )
@@ -196,13 +196,13 @@ const another = await mail.redeemEmailLogin(secondLink);
 const results = await Promise.allSettled([
   auth.configureFirstPassword(
     setupRequest,
-    'Nueva-segura-123',
-    'Nueva-segura-123',
+    'Nueva6',
+    'Nueva6',
   ),
   auth.configureFirstPassword(
     request('/api/auth/password', another.token, {}),
-    'Alternativa-123',
-    'Alternativa-123',
+    'Otra66',
+    'Otra66',
   ),
 ]);
 assert.equal(
@@ -224,9 +224,9 @@ const stored = db
   )
   .get();
 assert.ok(stored.password_salt && stored.password_configured_at);
-assert.notEqual(stored.password_hash, 'Nueva-segura-123');
+assert.notEqual(stored.password_hash, 'Nueva6');
 const winningPassword =
-  results[0].status === 'fulfilled' ? 'Nueva-segura-123' : 'Alternativa-123';
+  results[0].status === 'fulfilled' ? 'Nueva6' : 'Otra66';
 const login = await sessionApi.POST(
   request('/api/auth/session', null, {
     action: 'login',
