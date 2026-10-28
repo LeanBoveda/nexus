@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { exerciseSuggestions } from '@/lib/exercise-suggestions';
 import {
   Activity,
   ArrowLeft,
@@ -229,6 +230,18 @@ const initialSessions: TrainingSession[] = [
 ];
 
 export function RoutineEditor() {
+  const [exerciseNames, setExerciseNames] = useState<string[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/exercises', { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        return response.json() as Promise<{ names: string[] }>;
+      })
+      .then((data) => setExerciseNames(data.names ?? []))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [routineId, setRoutineId] = useState('');
   const [versionNumber, setVersionNumber] = useState(0);
   const [routineName, setRoutineName] = useState('Nueva planificación');
@@ -997,12 +1010,22 @@ export function RoutineEditor() {
                         <div className="min-w-0 flex-1">
                           <input
                             value={row.name}
+                            list={`exercise-suggestions-${row.id}`}
+                            autoComplete="off"
+                            placeholder="Escribí un ejercicio (sugerencias desde 2 letras)"
                             onChange={(event) =>
                               updateExercise(row.id, 'name', event.target.value)
                             }
                             aria-label={`Nombre del ejercicio ${index + 1} del bloque ${block}`}
                             className="w-full bg-transparent text-base font-semibold outline-none focus:text-[#29445e]"
                           />
+                          <datalist id={`exercise-suggestions-${row.id}`}>
+                            {exerciseSuggestions(exerciseNames, row.name).map(
+                              (name) => (
+                                <option key={name} value={name} />
+                              ),
+                            )}
+                          </datalist>
                           <input
                             aria-label={`Categoría de ${row.name}`}
                             value={row.category}
