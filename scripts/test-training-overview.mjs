@@ -37,6 +37,7 @@ const {
   canonicalTrainingLogs,
   trainingLogDate,
   getTrainingOverview,
+  filterTrainingOverview,
 } = await import(overviewUrl);
 assert.deepEqual(overviewRange('2020-01-01', '2026-10-21'), {
   from: '2026-07-24',
@@ -128,6 +129,33 @@ assert.equal(result.entries.length, 1);
 assert.equal(result.entries[0].id, 'current');
 assert.equal(result.entries[0].completedAt, null);
 assert.equal(result.entries[0].date, '2026-10-14');
+db.exec(`INSERT INTO organizations(id,trainer_account_id,name,type) VALUES ('o1','p1','Club propio','Club'),('o2','p2','Otro club','Club');
+INSERT INTO groups(id,organization_id,name,sport,active) VALUES ('g1','o1','Plantel','General',1),('g2','o1','Plantel','General',1),('gone','o1','Baja','General',1),('inactive','o1','Archivado','General',0),('foreign','o2','Ajeno','General',1);
+INSERT INTO group_memberships(athlete_id,group_id,ended_at) VALUES ('a1','g1',NULL),('a1','g2',NULL),('a1','gone',1),('a1','inactive',NULL),('a1','foreign',NULL);`);
+const grouped = await getTrainingOverview('p1', '2026-10-12', '2026-10-18');
+assert.deepEqual([...grouped.assignments[0].groupIds].sort(), ['g1', 'g2']);
+for (const id of ['g1', 'g2']) {
+  assert.equal(
+    filterTrainingOverview(grouped, undefined, id).entries.length,
+    1,
+  );
+  assert.equal(filterTrainingOverview(grouped, 'a1', id).assignments.length, 1);
+}
+for (const id of ['gone', 'inactive', 'foreign', 'unknown', '__ungrouped']) {
+  const filtered = filterTrainingOverview(grouped, undefined, id);
+  assert.equal(filtered.entries.length, 0);
+  assert.equal(
+    filtered.assignments.length,
+    0,
+    'No planned sessions leak into group totals',
+  );
+}
+assert.equal(filterTrainingOverview(grouped, 'a2', 'g1').entries.length, 0);
+assert.equal(filterTrainingOverview(grouped).entries.length, 1);
+assert.equal(
+  filterTrainingOverview(result, undefined, '__ungrouped').entries.length,
+  1,
+);
 assert.equal(
   (await getTrainingOverview('p1', '2026-10-12', '2026-10-18', 'a2')).entries
     .length,

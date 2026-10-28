@@ -2,6 +2,7 @@
 import { resolveRoutineSession } from '@/lib/athlete-portal';
 import {
   addTrainingDays,
+  filterTrainingOverview,
   type TrainingOverview,
 } from '@/lib/training-overview';
 
@@ -31,19 +32,22 @@ export function TrainingOverviewView({
   to,
   data,
   athleteId,
+  groupId,
+  groups = [],
 }: {
   mode: 'agenda' | 'carga';
   from: string;
   to: string;
   data: TrainingOverview;
   athleteId?: string;
+  groupId?: string;
+  groups?: { id: string; name: string; organizationName: string }[];
 }) {
   const people = [
     ...new Map(data.assignments.map((item) => [item.athleteId, item])).values(),
   ];
-  const entries = data.entries
-    .filter((entry) => !athleteId || entry.athleteId === athleteId)
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const filtered = filterTrainingOverview(data, athleteId, groupId);
+  const entries = filtered.entries.sort((a, b) => b.date.localeCompare(a.date));
   const dayCount =
     mode === 'agenda'
       ? 7
@@ -58,7 +62,7 @@ export function TrainingOverviewView({
     addTrainingDays(from, index),
   ).map((date) => ({
     date,
-    sessions: data.assignments
+    sessions: filtered.assignments
       .filter(
         (item) =>
           (!athleteId || item.athleteId === athleteId) &&
@@ -158,6 +162,27 @@ export function TrainingOverviewView({
               />
             </label>
             <label className="grid gap-1 text-sm font-semibold">
+              Grupo
+              <select
+                name="group"
+                defaultValue={groupId ?? ''}
+                className={fieldClass}
+              >
+                <option value="">Todos los grupos</option>
+                <option value="__ungrouped">Sin grupo</option>
+                {groupId &&
+                  groupId !== '__ungrouped' &&
+                  !groups.some((group) => group.id === groupId) && (
+                    <option value={groupId}>Grupo no disponible</option>
+                  )}
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name} · {group.organizationName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">
               Alumno
               <select
                 name="athlete"
@@ -184,6 +209,12 @@ export function TrainingOverviewView({
           {formatDate(from)} al {formatDate(to)}
         </p>
       </form>
+      {mode === 'carga' && groupId && (
+        <p className="text-xs text-muted-foreground">
+          El filtro usa los grupos actuales del alumno y se aplica a los
+          registros y las sesiones previstas del período.
+        </p>
+      )}
       {mode === 'agenda' ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {calendar.map((day) => (

@@ -8,6 +8,8 @@ export type AssignedTraining = {
   firstName: string;
   lastName: string;
   groups: string;
+  groupIds?: string[];
+  groupIdsJson?: string;
   name: string;
   description: string | null;
   content: unknown;
@@ -111,7 +113,11 @@ export async function getTrainingOverview(
   const assignments = await db
     .prepare(`SELECT ari.id AS instanceId, a.id AS athleteId, a.first_name AS firstName, a.last_name AS lastName,
     COALESCE((SELECT GROUP_CONCAT(g.name, ', ') FROM group_memberships gm JOIN groups g ON g.id = gm.group_id
-      WHERE gm.athlete_id = a.id AND gm.ended_at IS NULL AND g.active = 1), '') AS groups,
+      JOIN organizations o ON o.id = g.organization_id
+      WHERE gm.athlete_id = a.id AND gm.ended_at IS NULL AND g.active = 1 AND o.trainer_account_id = a.trainer_account_id), '') AS groups,
+    (SELECT json_group_array(g.id) FROM group_memberships gm JOIN groups g ON g.id = gm.group_id
+      JOIN organizations o ON o.id = g.organization_id
+      WHERE gm.athlete_id = a.id AND gm.ended_at IS NULL AND g.active = 1 AND o.trainer_account_id = a.trainer_account_id) AS groupIdsJson,
     r.name, r.description, rv.content, ari.overrides, ra.starts_on AS startsOn,
     CASE WHEN ari.status = 'cancelled' THEN
       CASE WHEN ra.ends_on IS NULL OR ra.ends_on >= COALESCE(ari.ended_on, ?) THEN date(COALESCE(ari.ended_on, ?), '-1 day') ELSE ra.ends_on END
@@ -147,8 +153,14 @@ export async function getTrainingOverview(
     ORDER BY wl.created_at DESC`)
     .bind(trainerAccountId, athleteId ?? '', athleteId ?? '', from, to)
     .all<TrainingLog>();
+  const normalizedAssignments = assignments.results.map(
+    ({ groupIdsJson, ...item }) => ({
+      ...item,
+      groupIds: JSON.parse(groupIdsJson || '[]') as string[],
+    }),
+  );
   const mapped = new Map(
-    assignments.results.map((item) => [item.instanceId, item]),
+    normalizedAssignments.map((item) => [item.instanceId, item]),
   );
   const entries = canonicalTrainingLogs(logs.results).flatMap((log) => {
     const assignment = mapped.get(log.instanceId);
@@ -160,6 +172,26 @@ export async function getTrainingOverview(
       ? [{ ...log, date, assignment }]
       : [];
   });
-  return { assignments: assignments.results, entries };
+  return { assignments: normalizedAssignments, entries };
 }
 export type TrainingOverview = Awaited<ReturnType<typeof getTrainingOverview>>;
+
+export function filterTrainingOverview(
+  data: TrainingOverview,
+  athleteId?: string,
+  groupId?: string,
+) {
+  const assignments = data.assignments.filter(
+    (item) =>
+      (!athleteId || item.athleteId === athleteId) &&
+      (!groupId ||
+        (groupId === '__ungrouped'
+          ? !item.groupIds.length
+          : item.groupIds.includes(groupId))),
+  );
+  const instances = new Set(assignments.map((item) => item.instanceId));
+  return {
+    assignments,
+    entries: data.entries.filter((entry) => instances.has(entry.instanceId)),
+  };
+}
