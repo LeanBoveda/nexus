@@ -6,7 +6,8 @@ Aplicación multideporte para preparadores físicos y sus deportistas.
 
 - El administrador habilita PF y controla planes, precios, cupos y acceso. Vencimientos y cobros siguen siendo manuales.
 - Cada PF administra fichas y grupos. Puede importar hasta 500 alumnos desde XLSX, CSV o TSV con revisión previa.
-- Una persona puede tener fichas de distintos PF usando el mismo email. Al verificar su correo puede elegir el profesor; cada ficha conserva sus datos separados. Un enlace creado por un PF sólo habilita la ficha de ese PF.
+- El primer ingreso verifica el correo por enlace y exige crear una contraseña. Luego se ingresa con email y contraseña. El acceso temporal de configuración no permite consultar ni modificar datos de la aplicación.
+- Una persona puede tener fichas de distintos PF usando el mismo email. Al verificar su correo puede elegir el profesor; cada ficha conserva sus datos separados. Los enlaces antiguos de PF llevan al primer ingreso, sin iniciar sesión automáticamente.
 - Las rutinas tienen entre 2 y 4 días. La semana avanza cada 7 días desde el inicio de la asignación, aunque falten sesiones. La última semana continúa hasta el fin configurado de la asignación.
 - El deportista puede elegir una fecha anterior y corregirla. Se validan versión, sesión y ejercicios; no se admiten registros futuros. Se guardan fecha entrenada y fecha de edición.
 - Editar una rutina crea una versión nueva. Las asignaciones existentes conservan su versión; la nueva se entrega mediante otra asignación.

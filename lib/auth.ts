@@ -38,6 +38,73 @@ export async function getSession(): Promise<NexoUser | null> {
   return getSessionByToken(cookieStore.get(SESSION_COOKIE)?.value);
 }
 
+export async function getPasswordSetupSession(request?: Request) {
+  const token = request
+    ? readCookie(request.headers.get('cookie'), SESSION_COOKIE)
+    : (await cookies()).get(SESSION_COOKIE)?.value;
+  return getSessionByToken(token, true);
+}
+
+export function loginDestination(user: NexoUser) {
+  return user.isPlatformAdmin
+    ? '/admin'
+    : user.role === 'athlete'
+      ? user.athleteId
+        ? '/mi-entrenamiento'
+        : '/mis-profesores'
+      : '/';
+}
+
+export async function configureFirstPassword(
+  request: Request,
+  password: unknown,
+  confirmation: unknown,
+) {
+  const user = await getPasswordSetupSession(request);
+  if (!user)
+    throw new AuthError(
+      'El acceso de configuración venció. Solicitá un nuevo enlace.',
+      401,
+    );
+  if (
+    typeof password !== 'string' ||
+    password.length < 10 ||
+    password.length > 128
+  )
+    throw new AuthError('Usá una contraseña de entre 10 y 128 caracteres.');
+  if (confirmation !== password)
+    throw new AuthError('Las contraseñas no coinciden.');
+  const { salt, hash } = await hashPassword(password);
+  const result =
+    await env.DB.prepare(`UPDATE users SET password_salt = ?, password_hash = ?, password_configured_at = ?
+    WHERE id = ? AND password_configured_at IS NULL AND EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = users.id AND s.token_hash = ? AND s.password_setup = 1 AND s.expires_at > ?)`)
+      .bind(
+        salt,
+        hash,
+        Date.now(),
+        user.id,
+        await sha256(
+          readCookie(request.headers.get('cookie'), SESSION_COOKIE)!,
+        ),
+        Date.now(),
+      )
+      .run();
+  if (!result.meta.changes)
+    throw new AuthError(
+      'La contraseña ya fue configurada o el enlace venció. Ingresá desde el login.',
+      409,
+    );
+  await env.DB.prepare('DELETE FROM auth_sessions WHERE user_id = ?')
+    .bind(user.id)
+    .run();
+  const token = await createSession(
+    user.id,
+    user.athleteId,
+    user.scopedAthleteId ?? null,
+  );
+  return { token, destination: loginDestination(user) };
+}
+
 export async function getSessionFromRequest(
   request: Request,
 ): Promise<NexoUser | null> {
@@ -117,8 +184,8 @@ export async function createOwner(input: {
     ),
     env.DB.prepare(`INSERT INTO users
       (id, trainer_account_id, email, name, role, password_salt, password_hash,
-       status, is_platform_admin, created_at)
-      VALUES (?, ?, ?, ?, 'owner', ?, ?, 'active', ?, ?)`).bind(
+       status, is_platform_admin, created_at, password_configured_at)
+      VALUES (?, ?, ?, ?, 'owner', ?, ?, 'active', ?, ?, ?)`).bind(
       id,
       accountId,
       email,
@@ -126,6 +193,7 @@ export async function createOwner(input: {
       salt,
       hash,
       isPlatformAdminEmail(email) ? 1 : 0,
+      now,
       now,
     ),
     env.DB.prepare(`INSERT INTO auth_sessions
@@ -146,6 +214,13 @@ export async function authenticate(input: {
   password: string;
   ip: string;
 }) {
+  if (
+    typeof input.email !== 'string' ||
+    typeof input.password !== 'string' ||
+    input.email.length > 254 ||
+    input.password.length > 128
+  )
+    throw new AuthError('Email o contraseña incorrectos.', 401);
   await initializeLegacyAccount();
   const email = normalizeEmail(input.email);
   const rateKey = await sha256(`${input.ip}|${email}`);
@@ -153,7 +228,7 @@ export async function authenticate(input: {
 
   const user =
     await env.DB.prepare(`SELECT u.id, u.password_salt AS passwordSalt,
-    u.password_hash AS passwordHash, u.trainer_account_id AS trainerAccountId,
+    u.password_hash AS passwordHash, u.password_configured_at AS passwordConfiguredAt, u.trainer_account_id AS trainerAccountId,
     ta.access_status AS accountAccessStatus
     FROM users u LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
     WHERE u.email = ? AND u.status = 'active' LIMIT 1`)
@@ -162,12 +237,14 @@ export async function authenticate(input: {
         id: string;
         passwordSalt: string | null;
         passwordHash: string | null;
+        passwordConfiguredAt: number | null;
         trainerAccountId: string | null;
         accountAccessStatus: string | null;
       }>();
 
   const valid = Boolean(
     user?.passwordSalt &&
+    user.passwordConfiguredAt != null &&
     user.passwordHash &&
     (await verifyPassword(
       input.password,
@@ -344,17 +421,19 @@ export async function createSession(
   userId: string,
   activeAthleteId: string | null = null,
   scopedAthleteId: string | null = null,
+  passwordSetup = false,
 ) {
   const token = randomToken(32);
   const now = Date.now();
   await env.DB.prepare(`INSERT INTO auth_sessions
-    (token_hash, user_id, active_athlete_id, scoped_athlete_id, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    (token_hash, user_id, active_athlete_id, scoped_athlete_id, password_setup, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(
       await sha256(token),
       userId,
       activeAthleteId,
       scopedAthleteId,
-      now + SESSION_DURATION_MS,
+      passwordSetup ? 1 : 0,
+      now + (passwordSetup ? 15 * 60_000 : SESSION_DURATION_MS),
       now,
       now,
     )
@@ -362,14 +441,17 @@ export async function createSession(
   return token;
 }
 
-async function getSessionByToken(token?: string): Promise<NexoUser | null> {
+async function getSessionByToken(
+  token?: string,
+  onlyPasswordSetup = false,
+): Promise<NexoUser | null> {
   if (!token) return null;
   await initializeLegacyAccount();
   const now = Date.now();
   const tokenHash = await sha256(token);
   const result = await env.DB.prepare(`SELECT u.id, u.email, u.name, u.role,
     u.athlete_id AS athleteId, u.trainer_account_id AS trainerAccountId,
-    u.is_platform_admin AS isPlatformAdmin,
+    u.is_platform_admin AS isPlatformAdmin, u.password_configured_at AS passwordConfiguredAt, s.password_setup AS passwordSetup,
     ta.access_status AS accountAccessStatus,
     s.expires_at AS expiresAt, s.last_seen_at AS lastSeenAt,
     s.active_athlete_id AS activeAthleteId, s.scoped_athlete_id AS scopedAthleteId
@@ -382,6 +464,8 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
         expiresAt: number;
         lastSeenAt: number;
         activeAthleteId: string | null;
+        passwordConfiguredAt: number | null;
+        passwordSetup: number;
       }
     >();
   if (
@@ -396,6 +480,12 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
       .run();
     return null;
   }
+  if (
+    onlyPasswordSetup
+      ? result.passwordSetup !== 1 || result.passwordConfiguredAt != null
+      : result.passwordSetup === 1
+  )
+    return null;
   if (result.role === 'athlete') {
     await linkLegacyAthleteIdentity(result.id);
     const contexts = await getAthleteContexts(

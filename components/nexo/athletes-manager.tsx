@@ -646,12 +646,10 @@ export function AthletesManager() {
                 <ShieldCheck className="size-4" />
               </span>
               <div>
-                <p className="text-sm font-semibold">
-                  Enlace seguro de un solo uso
-                </p>
+                <p className="text-sm font-semibold">Acceso a Nexo</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Vence en 7 días. Al usarlo, la sesión queda iniciada en ese
-                  dispositivo. Crear uno nuevo invalida el anterior.
+                  El primer ingreso verifica el correo y permite crear la
+                  contraseña. Si ya la creó, ingresa con su email y contraseña.
                 </p>
               </div>
             </div>

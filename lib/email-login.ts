@@ -103,7 +103,7 @@ async function eligibleUser(email: string) {
 }
 
 async function activeIdentity(id: string, email: string) {
-  return env.DB.prepare(`SELECT u.id, u.role, u.email FROM users u
+  return env.DB.prepare(`SELECT u.id, u.role, u.email, u.password_configured_at AS passwordConfiguredAt FROM users u
     LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
     WHERE u.id = ? AND lower(u.email) = ? AND (
       (u.role != 'athlete' AND u.status = 'active' AND
@@ -115,7 +115,12 @@ async function activeIdentity(id: string, email: string) {
           AND (ai.user_id IS NULL OR ai.user_id = u.id)
       )))`)
     .bind(id, email, isPlatformAdminEmail(email) ? 1 : 0)
-    .first<{ id: string; role: string; email: string }>();
+    .first<{
+      id: string;
+      role: string;
+      email: string;
+      passwordConfiguredAt: number | null;
+    }>();
 }
 
 export async function requestEmailLogin(emailInput: unknown, ip: string) {
@@ -131,7 +136,8 @@ export async function requestEmailLogin(emailInput: unknown, ip: string) {
   await limitEmailRequest(`ip:${ip}`, 15, 15 * 60_000);
   await limitEmailRequest(`email:${email}`, 3, 15 * 60_000);
   const user = await eligibleUser(email);
-  if (!user) return { delivery: 'not_sent' as const };
+  if (!user || user.passwordConfiguredAt != null)
+    return { delivery: 'not_sent' as const };
   const token = randomSecret();
   const hash = await digest(token);
   await env.DB.prepare(
@@ -191,6 +197,11 @@ export async function redeemEmailLogin(token: string) {
       'Tu cuenta no está habilitada. Contactá a tu PF o al administrador.',
       403,
     );
+  if (user.passwordConfiguredAt != null)
+    throw new AuthError(
+      'Ya creaste tu contraseña. Ingresá con email y contraseña.',
+      409,
+    );
   if (user.role === 'athlete') {
     await linkVerifiedAthleteProfiles(user.id, user.email);
     await env.DB.prepare(
@@ -205,14 +216,15 @@ export async function redeemEmailLogin(token: string) {
       token: await createSession(
         user.id,
         contexts.length === 1 ? contexts[0].athleteId : null,
+        null,
+        true,
       ),
-      destination:
-        contexts.length > 1 ? '/mis-profesores' : '/mi-entrenamiento',
+      destination: '/crear-contrasena',
     };
   }
   return {
-    token: await createSession(user.id),
-    destination: isPlatformAdminEmail(user.email) ? '/admin' : '/',
+    token: await createSession(user.id, null, null, true),
+    destination: '/crear-contrasena',
   };
 }
 

@@ -377,6 +377,7 @@ export const users = sqliteTable(
     role: text('role', { enum: ['owner', 'coach', 'athlete'] }).notNull(),
     passwordSalt: text('password_salt'),
     passwordHash: text('password_hash'),
+    passwordConfiguredAt: integer('password_configured_at'),
     athleteId: text('athlete_id').references(() => athletes.id, {
       onDelete: 'set null',
     }),
@@ -408,6 +409,7 @@ export const authSessions = sqliteTable(
     scopedAthleteId: text('scoped_athlete_id').references(() => athletes.id, {
       onDelete: 'cascade',
     }),
+    passwordSetup: integer('password_setup').notNull().default(0),
     expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
     createdAt,
     lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),

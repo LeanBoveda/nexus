@@ -137,7 +137,7 @@ const redeemed = await Promise.allSettled([
 assert.equal(redeemed.filter((r) => r.status === 'fulfilled').length, 1);
 assert.equal(
   redeemed.find((r) => r.status === 'fulfilled').value.destination,
-  '/',
+  '/crear-contrasena',
 );
 await login.requestEmailLogin('pf@example.com', 'ip2');
 db.prepare('UPDATE email_tokens SET expires_at = 0 WHERE token_hash = ?').run(
@@ -159,7 +159,7 @@ await assert.rejects(
 await login.requestEmailLogin('leandroboveda@gmail.com', 'admin-ip');
 assert.equal(
   (await login.redeemEmailLogin(deliveries.at(-1))).destination,
-  '/admin',
+  '/crear-contrasena',
 );
 assert.equal(
   db
@@ -175,7 +175,7 @@ await login.requestEmailLogin(
 );
 assert.equal(
   (await login.redeemEmailLogin(deliveries.at(-1))).destination,
-  '/admin',
+  '/crear-contrasena',
 );
 assert.equal(
   db
@@ -201,7 +201,7 @@ db.prepare(
 await login.requestEmailLogin('ana@example.com', 'athlete-ip');
 assert.equal(
   (await login.redeemEmailLogin(deliveries.at(-1))).destination,
-  '/mi-entrenamiento',
+  '/crear-contrasena',
 );
 db.prepare(
   `INSERT INTO trainer_accounts (id,business_name,slug,contact_email) VALUES ('t2','Segundo PF','fixture2','pf2@example.com')`,
@@ -212,7 +212,7 @@ db.prepare(
 await login.requestEmailLogin('ana@example.com', 'athlete-ip2');
 assert.equal(
   (await login.redeemEmailLogin(deliveries.at(-1))).destination,
-  '/mis-profesores',
+  '/crear-contrasena',
 );
 const athleteIdentity = db
   .prepare("SELECT id FROM users WHERE email='ana@example.com'")
