@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { isPlatformAdminEmail } from '@/lib/platform-admins';
 import {
   getAthleteContexts,
   linkLegacyAthleteIdentity,
@@ -12,7 +13,6 @@ const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 7;
 const ATHLETE_ACCESS_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
-const PLATFORM_ADMIN_EMAIL = 'leandroboveda@gmail.com';
 
 export type NexoUser = {
   id: string;
@@ -125,7 +125,7 @@ export async function createOwner(input: {
       input.name.trim(),
       salt,
       hash,
-      email === PLATFORM_ADMIN_EMAIL ? 1 : 0,
+      isPlatformAdminEmail(email) ? 1 : 0,
       now,
     ),
     env.DB.prepare(`INSERT INTO auth_sessions
@@ -431,8 +431,7 @@ async function getSessionByToken(token?: string): Promise<NexoUser | null> {
     athleteId: result.athleteId,
     trainerAccountId: result.trainerAccountId,
     isPlatformAdmin:
-      result.role !== 'athlete' &&
-      normalizeEmail(result.email) === PLATFORM_ADMIN_EMAIL,
+      result.role !== 'athlete' && isPlatformAdminEmail(result.email),
     accountAccessStatus: result.accountAccessStatus,
     scopedAthleteId: result.scopedAthleteId ?? null,
   };

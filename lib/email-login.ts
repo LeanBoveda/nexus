@@ -1,13 +1,13 @@
 import { env } from 'cloudflare:workers';
 import { AuthError, createSession } from '@/lib/auth';
 import { digest, randomSecret, unseal } from '@/lib/email-security';
+import { isPlatformAdminEmail } from '@/lib/platform-admins';
 import {
   getAthleteContexts,
   linkVerifiedAthleteProfiles,
 } from '@/lib/athlete-identities';
 
 export const SITE_ORIGIN = 'https://nexo-rendimiento.cuentagpt050.chatgpt.site';
-export const ADMIN_EMAIL = 'leandroboveda@gmail.com';
 export const GOOGLE_CALLBACK = `${SITE_ORIGIN}/api/admin/email/callback`;
 
 export async function emailReady() {
@@ -64,8 +64,8 @@ async function eligibleUser(email: string) {
   let user = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?')
     .bind(email)
     .first<{ id: string }>();
-  // Only the explicitly designated platform owner can bootstrap an admin identity.
-  if (!user && email === ADMIN_EMAIL) {
+  // Only explicitly authorized platform administrators can bootstrap an identity.
+  if (!user && isPlatformAdminEmail(email)) {
     await env.DB.prepare(`INSERT OR IGNORE INTO users (id, email, name, role, status, is_platform_admin, created_at)
       VALUES (?, ?, 'Administrador Nexo', 'coach', 'active', 1, ?)`)
       .bind(crypto.randomUUID(), email, Date.now())
@@ -107,14 +107,14 @@ async function activeIdentity(id: string, email: string) {
     LEFT JOIN trainer_accounts ta ON ta.id = u.trainer_account_id
     WHERE u.id = ? AND lower(u.email) = ? AND (
       (u.role != 'athlete' AND u.status = 'active' AND
-        ((u.trainer_account_id IS NOT NULL AND ta.access_status = 'active') OR u.email = ?))
+        ((u.trainer_account_id IS NOT NULL AND ta.access_status = 'active') OR ? = 1))
       OR (u.role = 'athlete' AND EXISTS (
         SELECT 1 FROM athletes a JOIN trainer_accounts account ON account.id = a.trainer_account_id
         LEFT JOIN athlete_identities ai ON ai.athlete_id = a.id
         WHERE lower(trim(a.email)) = lower(u.email) AND a.status = 'active' AND account.access_status = 'active'
           AND (ai.user_id IS NULL OR ai.user_id = u.id)
       )))`)
-    .bind(id, email, ADMIN_EMAIL)
+    .bind(id, email, isPlatformAdminEmail(email) ? 1 : 0)
     .first<{ id: string; role: string; email: string }>();
 }
 
@@ -212,7 +212,7 @@ export async function redeemEmailLogin(token: string) {
   }
   return {
     token: await createSession(user.id),
-    destination: user.email === ADMIN_EMAIL ? '/admin' : '/',
+    destination: isPlatformAdminEmail(user.email) ? '/admin' : '/',
   };
 }
 
