@@ -244,7 +244,23 @@ async function sendLoginEmail(to: string, url: string) {
     }),
     signal: AbortSignal.timeout(15_000),
   });
-  if (!auth.ok) throw new Error('Gmail authorization failed');
+  if (!auth.ok) {
+    const failure = (await auth.json().catch(() => ({}))) as {
+      error?: unknown;
+    };
+    const code =
+      typeof failure.error === 'string' &&
+      [
+        'invalid_grant',
+        'invalid_client',
+        'unauthorized_client',
+        'access_denied',
+      ].includes(failure.error)
+        ? failure.error
+        : 'oauth_rejected';
+    console.error('[email-login] Gmail OAuth rejected', { code });
+    throw new Error('Gmail authorization failed');
+  }
   const data = (await auth.json()) as { access_token: string };
   const body = `Entrá a Nexo usando este enlace:\r\n\r\n${url}\r\n\r\nVence en 15 minutos y se puede usar una sola vez.\r\nSi no solicitaste este correo, ignoralo. No compartas el enlace.`;
   const mime = [

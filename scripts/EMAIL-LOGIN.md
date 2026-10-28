@@ -9,6 +9,12 @@ Initial setup uses `/api/admin/email/connect?setup=<EMAIL_SETUP_TOKEN>`.
 This capability works only before the first Gmail connection. Open it privately,
 authorize only the designated sender, and remove the setup secret afterwards.
 Further connections require a logged-in platform administrator.
+Exception: `/recuperar-correo` can renew only the already-configured sender via
+Google OAuth without a Nexo session. The state binds the existing sender, has a
+10-minute TTL and is bound to a secure HttpOnly browser cookie. Callback verifies
+the Google-confirmed email and send scope, then conditionally updates that sender's
+encrypted refresh token. It never inserts a different sender or issues a Nexo session.
+Recovery initiations are rate-limited. Google consent remains a human-owned step.
 The registered callback is `/api/admin/email/callback` on the production origin.
 OAuth requests `openid`, `email`, and `gmail.send`; mailbox reading is not requested.
 Google consent-screen Testing mode is not a durable production configuration:
