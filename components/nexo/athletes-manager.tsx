@@ -34,6 +34,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -105,6 +106,12 @@ export function AthletesManager() {
   const [editing, setEditing] = useState<Athlete | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Athlete | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [selected, setSelected] = useState<Map<string, string>>(new Map());
+  const [bulkTargets, setBulkTargets] = useState<Array<{
+    id: string;
+    name: string;
+  }> | null>(null);
+  const [bulkError, setBulkError] = useState('');
   const [accessTarget, setAccessTarget] = useState<Athlete | null>(null);
   const [accessUrl, setAccessUrl] = useState('');
   const [accessError, setAccessError] = useState('');
@@ -201,6 +208,54 @@ export function AthletesManager() {
     setFormOpen(true);
   }
 
+  function selectAthletes(items: Athlete[], checked: boolean) {
+    const next = new Map(selected);
+    for (const athlete of items) {
+      if (checked)
+        next.set(athlete.id, `${athlete.firstName} ${athlete.lastName}`);
+      else next.delete(athlete.id);
+    }
+    if (next.size > 500) {
+      setError('Podés seleccionar hasta 500 alumnos por operación.');
+      return;
+    }
+    setSelected(next);
+  }
+
+  async function archiveSelected() {
+    if (!bulkTargets?.length || archiving) return;
+    setArchiving(true);
+    setBulkError('');
+    setNotice('');
+    try {
+      const response = await fetch('/api/athletes', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids: bulkTargets.map((target) => target.id) }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        archivedCount?: number;
+      };
+      if (!response.ok)
+        throw new Error(result.error ?? 'No pudimos completar la baja.');
+      setNotice(
+        `Se dieron de baja ${result.archivedCount ?? bulkTargets.length} alumnos. Su historial se conserva.`,
+      );
+      setSelected(new Map());
+      setBulkTargets(null);
+      await loadData();
+    } catch (caught) {
+      setBulkError(
+        caught instanceof Error
+          ? caught.message
+          : 'No pudimos completar la baja.',
+      );
+    } finally {
+      setArchiving(false);
+    }
+  }
+
   function openEdit(athlete: Athlete) {
     setEditing(athlete);
     setFormOpen(true);
@@ -225,6 +280,11 @@ export function AthletesManager() {
         `${archiveTarget.firstName} ${archiveTarget.lastName} fue dado de baja.`,
       );
       setArchiveTarget(null);
+      setSelected((current) => {
+        const next = new Map(current);
+        next.delete(archiveTarget.id);
+        return next;
+      });
       await loadData();
     } catch (caught) {
       setError(
@@ -363,7 +423,10 @@ export function AthletesManager() {
             <Search className="size-4" />
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setSelected(new Map());
+              }}
               aria-label="Buscar cliente"
               placeholder="Buscar por nombre, email, posición o grupo…"
               className="w-full bg-transparent text-sm text-foreground outline-none"
@@ -374,6 +437,7 @@ export function AthletesManager() {
               value={groupFilter}
               onChange={(event) => {
                 setGroupFilter(event.target.value);
+                setSelected(new Map());
                 setPage(1);
               }}
               aria-label="Filtrar por grupo"
@@ -393,6 +457,7 @@ export function AthletesManager() {
               value={statusFilter}
               onChange={(event) => {
                 setStatusFilter(event.target.value);
+                setSelected(new Map());
                 setPage(1);
               }}
               aria-label="Filtrar por estado"
@@ -406,11 +471,62 @@ export function AthletesManager() {
             </NativeSelect>
           </div>
         </div>
+        {selected.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 border-b bg-muted/30 px-4 py-3">
+            <p className="flex-1 text-sm" aria-live="polite">
+              {selected.size} alumnos seleccionados. Podés seguir seleccionando
+              en otras páginas.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={archiving}
+              onClick={() => setSelected(new Map())}
+            >
+              Limpiar selección
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={archiving || loading || search !== debouncedSearch}
+              onClick={() => {
+                setBulkError('');
+                setBulkTargets(
+                  [...selected].map(([id, name]) => ({ id, name })),
+                );
+              }}
+            >
+              <Archive /> Dar de baja seleccionados
+            </Button>
+          </div>
+        )}
         <CardContent className="px-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/35 hover:bg-muted/35">
+                  <TableHead className="w-12 pl-4">
+                    <Checkbox
+                      aria-label="Seleccionar todos los alumnos de esta página"
+                      checked={
+                        athletes.length > 0 &&
+                        athletes.every((athlete) => selected.has(athlete.id))
+                      }
+                      indeterminate={
+                        athletes.some((athlete) => selected.has(athlete.id)) &&
+                        !athletes.every((athlete) => selected.has(athlete.id))
+                      }
+                      disabled={
+                        loading ||
+                        archiving ||
+                        athletes.length === 0 ||
+                        search !== debouncedSearch
+                      }
+                      onCheckedChange={(checked) =>
+                        selectAthletes(athletes, checked)
+                      }
+                    />
+                  </TableHead>
                   <TableHead className="pl-4 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                     Cliente
                   </TableHead>
@@ -434,7 +550,7 @@ export function AthletesManager() {
                   <LoadingRows />
                 ) : athletes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-52 text-center">
+                    <TableCell colSpan={7} className="h-52 text-center">
                       <p className="font-semibold">
                         {summary.active + summary.paused === 0
                           ? 'Todavía no cargaste clientes'
@@ -460,6 +576,16 @@ export function AthletesManager() {
                     const groupNames = splitGroups(athlete.groupNames);
                     return (
                       <TableRow key={athlete.id}>
+                        <TableCell className="pl-4">
+                          <Checkbox
+                            aria-label={`Seleccionar a ${athlete.firstName} ${athlete.lastName}`}
+                            checked={selected.has(athlete.id)}
+                            disabled={archiving || search !== debouncedSearch}
+                            onCheckedChange={(checked) =>
+                              selectAthletes([athlete], checked)
+                            }
+                          />
+                        </TableCell>
                         <TableCell className="pl-4">
                           <div className="flex items-center gap-3">
                             <Avatar className="size-10">
@@ -724,6 +850,56 @@ export function AthletesManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={Boolean(bulkTargets)}
+        onOpenChange={(open) => {
+          if (!open && !archiving) setBulkTargets(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Dar de baja a {bulkTargets?.length ?? 0} alumnos
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Se ocultarán de las listas activas, dejarán sus grupos y no podrán
+              acceder a estas fichas. Sus rutinas, evaluaciones e historial se
+              conservarán.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul
+            className="max-h-48 overflow-y-auto text-sm"
+            aria-label="Alumnos que se darán de baja"
+          >
+            {bulkTargets?.map((target) => (
+              <li key={target.id} className="py-1">
+                {target.name}
+              </li>
+            ))}
+          </ul>
+          {bulkError && (
+            <p role="alert" className="text-sm text-destructive">
+              {bulkError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={archiving}
+              className="bg-[#a23f30] text-white hover:bg-[#873327]"
+              onClick={(event) => {
+                event.preventDefault();
+                void archiveSelected();
+              }}
+            >
+              {archiving
+                ? 'Dando de baja…'
+                : `Confirmar baja de ${bulkTargets?.length ?? 0} alumnos`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={Boolean(archiveTarget)}
@@ -1014,7 +1190,7 @@ function LoadingRows() {
     <>
       {Array.from({ length: 4 }, (_, index) => (
         <TableRow key={index}>
-          <TableCell colSpan={6} className="px-4 py-4">
+          <TableCell colSpan={7} className="px-4 py-4">
             <div className="h-10 animate-pulse rounded-xl bg-muted" />
           </TableCell>
         </TableRow>

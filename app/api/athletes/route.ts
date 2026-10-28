@@ -11,35 +11,63 @@ export async function GET(request: Request) {
   if (!user?.trainerAccountId)
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   const params = new URL(request.url).searchParams;
-  const paginated = ['page', 'pageSize', 'q', 'status', 'group'].some((key) => params.has(key));
+  const paginated = ['page', 'pageSize', 'q', 'status', 'group'].some((key) =>
+    params.has(key),
+  );
   const pageInput = Number(params.get('page') ?? 1);
   const sizeInput = Number(params.get('pageSize') ?? 50);
   const status = params.get('status') ?? 'all';
   const group = (params.get('group') ?? 'all').trim();
   const query = (params.get('q') ?? '').trim();
-  if (!Number.isSafeInteger(pageInput) || pageInput < 1 || pageInput > 1000000 || !Number.isSafeInteger(sizeInput) || sizeInput < 1 || !['all', 'active', 'paused'].includes(status) || query.length > 200 || group.length > 140) {
-    return Response.json({ error: 'Los filtros o la página no son válidos.' }, { status: 400 });
+  if (
+    !Number.isSafeInteger(pageInput) ||
+    pageInput < 1 ||
+    pageInput > 1000000 ||
+    !Number.isSafeInteger(sizeInput) ||
+    sizeInput < 1 ||
+    !['all', 'active', 'paused'].includes(status) ||
+    query.length > 200 ||
+    group.length > 140
+  ) {
+    return Response.json(
+      { error: 'Los filtros o la página no son válidos.' },
+      { status: 400 },
+    );
   }
   const pageSize = Math.min(sizeInput, 100);
   const db = getD1();
   const activeMembership = `SELECT 1 FROM group_memberships gm_filter JOIN groups g_filter ON g_filter.id = gm_filter.group_id JOIN organizations o_filter ON o_filter.id = g_filter.organization_id WHERE gm_filter.athlete_id = a.id AND gm_filter.ended_at IS NULL AND g_filter.active = 1 AND o_filter.trainer_account_id = a.trainer_account_id`;
   const conditions = ["a.status != 'archived'", 'a.trainer_account_id = ?'];
   const bindings: (string | number)[] = [user.trainerAccountId];
-  if (status !== 'all') { conditions.push('a.status = ?'); bindings.push(status); }
+  if (status !== 'all') {
+    conditions.push('a.status = ?');
+    bindings.push(status);
+  }
   if (group === 'none') conditions.push(`NOT EXISTS (${activeMembership})`);
-  else if (group !== 'all') { conditions.push(`EXISTS (${activeMembership} AND g_filter.name = ?)`); bindings.push(group); }
+  else if (group !== 'all') {
+    conditions.push(`EXISTS (${activeMembership} AND g_filter.name = ?)`);
+    bindings.push(group);
+  }
   if (query) {
     const pattern = `%${query.replace(/[\\%_]/g, '\\$&')}%`;
-    conditions.push(`((a.first_name || ' ' || a.last_name || ' ' || a.email || ' ' || COALESCE(a.primary_position, '')) LIKE ? ESCAPE '\\' OR EXISTS (${activeMembership} AND g_filter.name LIKE ? ESCAPE '\\'))`);
+    conditions.push(
+      `((a.first_name || ' ' || a.last_name || ' ' || a.email || ' ' || COALESCE(a.primary_position, '')) LIKE ? ESCAPE '\\' OR EXISTS (${activeMembership} AND g_filter.name LIKE ? ESCAPE '\\'))`,
+    );
     bindings.push(pattern, pattern);
   }
   const where = conditions.join(' AND ');
   try {
-    const count = paginated ? await db.prepare(`SELECT COUNT(*) AS total FROM athletes a WHERE ${where}`).bind(...bindings).first<{ total: number }>() : null;
+    const count = paginated
+      ? await db
+          .prepare(`SELECT COUNT(*) AS total FROM athletes a WHERE ${where}`)
+          .bind(...bindings)
+          .first<{ total: number }>()
+      : null;
     const total = Number(count?.total ?? 0);
     const page = Math.min(pageInput, Math.max(1, Math.ceil(total / pageSize)));
     const [athletes, summary] = await Promise.all([
-      db.prepare(`SELECT a.id, a.first_name AS firstName, a.last_name AS lastName, a.email,
+      db
+        .prepare(`SELECT a.id, a.first_name AS firstName, a.last_name AS lastName, a.email,
       a.phone, a.birth_date AS birthDate, a.country_code AS countryCode,
       a.primary_position AS primaryPosition, a.primary_context AS primaryContext,
       a.status, a.created_at AS createdAt,
@@ -53,13 +81,38 @@ export async function GET(request: Request) {
     GROUP BY a.id, a.first_name, a.last_name, a.email, a.primary_position,
       a.phone, a.birth_date, a.country_code, a.primary_context, a.status, a.created_at
     ORDER BY a.last_name COLLATE NOCASE, a.first_name COLLATE NOCASE, a.id ${paginated ? 'LIMIT ? OFFSET ?' : ''}`)
-        .bind(...bindings, ...(paginated ? [pageSize, (page - 1) * pageSize] : [])).all(),
-      paginated ? db.prepare(`SELECT COALESCE(SUM(CASE WHEN a.status = 'active' THEN 1 ELSE 0 END), 0) AS active, COALESCE(SUM(CASE WHEN a.status = 'paused' THEN 1 ELSE 0 END), 0) AS paused, COALESCE(SUM(CASE WHEN NOT EXISTS (${activeMembership}) THEN 1 ELSE 0 END), 0) AS withoutGroup FROM athletes a WHERE a.status != 'archived' AND a.trainer_account_id = ?`).bind(user.trainerAccountId).first() : null,
+        .bind(
+          ...bindings,
+          ...(paginated ? [pageSize, (page - 1) * pageSize] : []),
+        )
+        .all(),
+      paginated
+        ? db
+            .prepare(
+              `SELECT COALESCE(SUM(CASE WHEN a.status = 'active' THEN 1 ELSE 0 END), 0) AS active, COALESCE(SUM(CASE WHEN a.status = 'paused' THEN 1 ELSE 0 END), 0) AS paused, COALESCE(SUM(CASE WHEN NOT EXISTS (${activeMembership}) THEN 1 ELSE 0 END), 0) AS withoutGroup FROM athletes a WHERE a.status != 'archived' AND a.trainer_account_id = ?`,
+            )
+            .bind(user.trainerAccountId)
+            .first()
+        : null,
     ]);
-    return Response.json({ athletes: athletes.results, ...(paginated ? { total, page, pageSize, summary } : {}) }, { headers: { 'Server-Timing': `athletes;dur=${(performance.now() - startedAt).toFixed(1)}`, 'Cache-Control': 'no-store' } });
+    return Response.json(
+      {
+        athletes: athletes.results,
+        ...(paginated ? { total, page, pageSize, summary } : {}),
+      },
+      {
+        headers: {
+          'Server-Timing': `athletes;dur=${(performance.now() - startedAt).toFixed(1)}`,
+          'Cache-Control': 'no-store',
+        },
+      },
+    );
   } catch (error) {
     console.error('[athletes] list failed', error);
-    return Response.json({ error: 'No pudimos cargar los clientes.' }, { status: 500 });
+    return Response.json(
+      { error: 'No pudimos cargar los clientes.' },
+      { status: 500 },
+    );
   }
 }
 
@@ -305,53 +358,84 @@ export async function DELETE(request: Request) {
     return Response.json({ error: 'No autorizado.' }, { status: 401 });
   if (!isSameOrigin(request))
     return Response.json({ error: 'Solicitud no permitida.' }, { status: 403 });
-  const input = await request.json<{ id?: string }>();
-  const id = input.id?.trim();
-  if (!id)
-    return Response.json({ error: 'Deportista inválido.' }, { status: 400 });
-
+  let input: { id?: unknown; ids?: unknown };
+  try {
+    input = await request.json();
+  } catch {
+    return Response.json({ error: 'Selección inválida.' }, { status: 400 });
+  }
+  const rawIds =
+    input && (input.ids ?? (typeof input.id === 'string' ? [input.id] : null));
+  if (
+    !Array.isArray(rawIds) ||
+    !rawIds.length ||
+    rawIds.length > 500 ||
+    rawIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 140)
+  )
+    return Response.json(
+      { error: 'Seleccioná entre 1 y 500 alumnos.' },
+      { status: 400 },
+    );
+  const ids = [...new Set(rawIds.map((id) => (id as string).trim()))];
+  const jsonIds = JSON.stringify(ids);
   const db = getD1();
   const existing = await db
-    .prepare(
-      "SELECT id FROM athletes WHERE id = ? AND trainer_account_id = ? AND status != 'archived' LIMIT 1",
-    )
-    .bind(id, user.trainerAccountId)
-    .first();
-  if (!existing)
+    .prepare(`SELECT COUNT(*) AS total FROM athletes
+    WHERE trainer_account_id=? AND id IN (SELECT value FROM json_each(?))`)
+    .bind(user.trainerAccountId, jsonIds)
+    .first<{ total: number }>();
+  if (existing?.total !== ids.length)
     return Response.json(
-      { error: 'El deportista ya no está disponible.' },
+      {
+        error: 'Uno o más alumnos ya no están disponibles. Actualizá la lista.',
+      },
       { status: 404 },
     );
-
+  // Every statement rechecks tenant ownership. A fixed five-statement batch
+  // keeps large selections atomic without exceeding D1 parameter/query limits.
+  const scope = `SELECT id FROM athletes WHERE trainer_account_id=? AND id IN (SELECT value FROM json_each(?))`;
   const now = Date.now();
-  await db.batch([
-    db
-      .prepare(
-        "UPDATE athletes SET status = 'archived' WHERE id = ? AND trainer_account_id = ?",
-      )
-      .bind(id, user.trainerAccountId),
-    db
-      .prepare(
-        'UPDATE group_memberships SET ended_at = ? WHERE athlete_id = ? AND ended_at IS NULL',
-      )
-      .bind(now, id),
-    db
-      .prepare(
-        `UPDATE athlete_routine_instances SET status = 'cancelled', ended_on = ?
-        WHERE athlete_id = ? AND status IN ('scheduled', 'active', 'completed')`,
-      )
-      .bind(cancellationEndsOn(new Date(now)), id),
-    db
-      .prepare(
-        `UPDATE athlete_access_links SET redeemed_at = ?
-        WHERE athlete_id = ? AND redeemed_at IS NULL`,
-      )
-      .bind(now, id),
-    db
-      .prepare('DELETE FROM auth_sessions WHERE active_athlete_id = ?')
-      .bind(id),
-  ]);
-  return Response.json({ ok: true });
+  try {
+    const [result] = await db.batch([
+      db
+        .prepare(
+          `UPDATE athletes SET status = 'archived' WHERE id IN (${scope}) AND status!='archived'`,
+        )
+        .bind(user.trainerAccountId, jsonIds),
+      db
+        .prepare(
+          `UPDATE group_memberships SET ended_at = ? WHERE athlete_id IN (${scope}) AND ended_at IS NULL`,
+        )
+        .bind(now, user.trainerAccountId, jsonIds),
+      db
+        .prepare(
+          `UPDATE athlete_routine_instances SET status = 'cancelled', ended_on = ?
+        WHERE athlete_id IN (${scope}) AND status IN ('scheduled', 'active', 'completed')`,
+        )
+        .bind(
+          cancellationEndsOn(new Date(now)),
+          user.trainerAccountId,
+          jsonIds,
+        ),
+      db
+        .prepare(
+          `UPDATE athlete_access_links SET redeemed_at = ?
+        WHERE athlete_id IN (${scope}) AND redeemed_at IS NULL`,
+        )
+        .bind(now, user.trainerAccountId, jsonIds),
+      db
+        .prepare(
+          `DELETE FROM auth_sessions WHERE active_athlete_id IN (${scope})`,
+        )
+        .bind(user.trainerAccountId, jsonIds),
+    ]);
+    return Response.json({ ok: true, archivedCount: result.meta.changes });
+  } catch {
+    return Response.json(
+      { error: 'No pudimos completar la baja. Intentá nuevamente.' },
+      { status: 500 },
+    );
+  }
 }
 
 function optionalText(value?: string) {
